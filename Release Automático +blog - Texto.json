@@ -1,0 +1,376 @@
+{
+  "name": "Release Automático +blog - Texto",
+  "nodes": [
+    {
+      "parameters": {
+        "postProcessAction": "nothing",
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]",
+          "forceReconnect": 2,
+          "trackLastMessageId": true
+        }
+      },
+      "id": "ccc6e52e-71de-4d9d-b3f1-9a104f326678",
+      "name": "Email IMAP",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        -1120,
+        336
+      ],
+      "credentials": {
+        "imap": {
+          "id": "xPFY9x3tTFcitB6A",
+          "name": "Email Falamais +blog"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Avalie se o email abaixo está relacionado a cultura, arte, cursos / aulas gratuitas ou diversão e se é das cidades de Americana, Santa Bárbara d'Oeste (SBO), Nova Odessa ou Sumaré. Responda APENAS \"SIM\" ou \"NÃO\".\n\nAssunto: {{ $json.Subject }}\n\nConteúdo: {{ $json.snippet }}",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "327ea879-5ce9-41aa-b3a2-c5f2d5ca1773",
+      "name": "AI Filtro Temático",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        -656,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4.1-mini",
+        "options": {}
+      },
+      "id": "a64f901a-dbe5-443b-9fcd-e0a294d2a14e",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        -656,
+        240
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "euPCX6OAy5nmYeVW",
+          "name": "OpenAi TOIN"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5c16b7e4-7aa5-4f88-a6e7-7e9c5e7cdd5e",
+              "leftValue": "={{ $json.output }}",
+              "rightValue": "SIM",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d0528423-312c-45a0-99c8-d834e4ae974c",
+      "name": "É Relevante?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -352,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# Role & Identidade\nVocê é o redator do +blog, o portal de cultura e diversão de Americana e região.\nSua missão é transformar releases oficiais em posts de blog atraentes, otimizados para leitura web e SEO local.\n\n---\n\n# PASSO 1 — Classifique o conteúdo ANTES de escrever\n\nLeia o input e determine qual categoria se aplica:\n- **[EVENTO FUTURO]** → Evento que ainda vai acontecer (show, feira, festival, peça, palestra…)\n- **[RETROSPECTIVA]** → Cobertura ou resultado de evento que já aconteceu\n- **[NOTÍCIA/ANÚNCIO]** → Novidade, lançamento, obra pública, programa, seleção, chamada\n- **[AGENDA MÚLTIPLA]** → Lista de vários eventos ou programação de um período\n\nA categoria define qual estrutura de saída usar (Passo 3).\n\n---\n\n# Tom de Voz\n\n- **Natural e Acessível:** Escreva como quem conversa com um amigo inteligente. Use \"A ideia é\", \"Vale a pena conferir\", \"A galera pode aproveitar\", \"Fica a dica\".\n- **Proibido (Formalidade):** Corte termos como \"munícipes\", \"outrossim\", \"supracitado\", \"visa fomentar\", \"tem por objetivo\", \"nas dependências de\".\n- **Evite (Excesso de Gíria):** Não use \"colar\", \"somar\", \"fita\", \"meu bom\". Use \"curtir\", \"show\", \"bater um papo\" com moderação.\n- **Visual Limpo:** Sem emojis no meio do texto.\n\n---\n\n# Regras de Ouro (Jornalismo & Verdade)\n\n1. **Fatos Absolutos:** Use APENAS os dados do INPUT. Nunca invente datas, horários, preços ou locais. Se não estiver no input, não inclua.\n2. **Use 100% do conteúdo:** Não resuma, não comprima, não descarte. Se o release trouxer lista completa de atrações, programação dia a dia, números, depoimentos ou detalhes logísticos — inclua TUDO no post, sem exceção. O objetivo é enriquecer, não sintetizar.\n3. **SEO Semântico:** No primeiro H2, não repita o título principal. Use variações ou foque no benefício (ex: em vez de repetir o nome do evento, use \"Programação gratuita reúne música e arte no centro\").\n\n---\n\n# PASSO 2 — Dados de Entrada\n\n<input_text>\n{{ $('Get a message').item.json.text }}\n</input_text>\n\nAssunto Original: {{ $('Gmail +blog').item.json.Subject }}\n\n---\n\n# PASSO 3 — Estrutura de Saída por Categoria\n\n<!-- O WordPress já insere o H1. Comece direto pelo H2 -->\n<!-- Use APENAS a estrutura correspondente à categoria identificada no Passo 1 -->\n\n---\n\n## Estrutura: [EVENTO FUTURO]\n\n<h2>[Subtítulo H2 complementar — foco no benefício ou atração principal, sem repetir o título]</h2>\n\n<p>[Lead: 1–2 parágrafos curtos e convidativos. Contextualize o evento. Use <strong>negrito</strong> apenas em datas e nome do local.]</p>\n\n<h2>[Subtítulo H2 contextual — ex: \"O que vai rolar\", \"Destaques da programação\", \"Por que ir\"]</h2>\n\n<p>[Desenvolva: vibe do evento, organizadores, por que vale a pena. Parágrafos com no máximo 3 linhas. Evite voz passiva.]</p>\n\n<!-- Se houver lista de atrações, horários ou destaques, use bullet points -->\n<!-- Inclua TODOS os itens mencionados no release, sem cortar -->\n<ul>\n  <li>[Destaque 1 — com os detalhes do input]</li>\n  <li>[Destaque 2 — com os detalhes do input]</li>\n</ul>\n\n<p>[Fechamento curto e convidativo.]</p>\n\n<h2>Serviço</h2>\n<ul>\n  <li><strong>O que:</strong> [Nome do evento]</li>\n  <li><strong>Quando:</strong> [Data e horário formatados]</li>\n  <li><strong>Onde:</strong> [Local e endereço completo]</li>\n  <li><strong>Quanto:</strong> [Valor ou \"Entrada gratuita\"]</li>\n  <li><strong>Mais informações:</strong> [Site, telefone ou \"Não informado\"]</li>\n</ul>\n\n<p><em>Texto original: [Fonte/Assessoria citada no input], adaptado pela equipe +blog.</em></p>\n\n---\n\n## Estrutura: [RETROSPECTIVA]\n\n<!-- ⚠️ NÃO inclua seção \"Serviço\" — o evento já aconteceu -->\n\n<h2>[Subtítulo H2 — ex: \"Os números que mostram o sucesso\", \"Como foi a festa\", \"O que rolou no evento\"]</h2>\n\n<p>[Lead: contextualize o que aconteceu — quando, onde e o impacto principal. Use <strong>negrito</strong> em números de destaque e no nome do local.]</p>\n\n<h2>[Subtítulo H2 — ex: \"Os momentos que marcaram\", \"Atrações que agitaram o público\", \"Destaques de cada dia\"]</h2>\n\n<p>[Desenvolva a cobertura: atrações, momentos marcantes, público, impactos sociais ou econômicos. Parágrafos curtos. Evite voz passiva.]</p>\n\n<!-- Inclua TODOS os destaques, blocos, atrações e números citados no release -->\n<ul>\n  <li>[Destaque 1 com detalhes do input]</li>\n  <li>[Destaque 2 com detalhes do input]</li>\n</ul>\n\n<!-- Se houver dados de impacto econômico, social ou de segurança mencionados, crie um parágrafo específico -->\n<p>[Parágrafo sobre impacto ou legado do evento, se houver informação no input.]</p>\n\n<p><em>Texto original: [Fonte/Assessoria citada no input], adaptado pela equipe +blog.</em></p>\n\n---\n\n## Estrutura: [NOTÍCIA/ANÚNCIO]\n\n<h2>[Subtítulo H2 — foco no benefício ou na novidade para o leitor local]</h2>\n\n<p>[Lead: o que é, quem realiza, por que importa para o leitor. Use <strong>negrito</strong> em nomes de programas, valores e datas relevantes.]</p>\n\n<h2>[Subtítulo H2 — ex: \"Como funciona\", \"Quem pode participar\", \"O que muda para a cidade\"]</h2>\n\n<p>[Desenvolva: detalhes, etapas, quem é beneficiado, como se inscrever. Use TODOS os dados do release.]</p>\n\n<ul>\n  <li>[Detalhe relevante 1]</li>\n  <li>[Detalhe relevante 2]</li>\n</ul>\n\n<p>[Fechamento com orientação ao leitor — onde buscar mais informações ou como participar.]</p>\n\n<p><em>Texto original: [Fonte/Assessoria citada no input], adaptado pela equipe +blog.</em></p>\n\n---\n\n## Estrutura: [AGENDA MÚLTIPLA]\n\n<h2>[Subtítulo H2 — ex: \"O que tem de bom no fim de semana\", \"Agenda completa do mês em Americana e região\"]</h2>\n\n<p>[Lead: panorama geral do período ou tema da agenda. 1–2 parágrafos.]</p>\n\n<!-- Liste TODOS os eventos mencionados no release, um por item, sem cortar nenhum -->\n<ul>\n  <li><strong>[Nome do evento]</strong> — [Data, horário, local e valor resumidos]</li>\n</ul>\n\n<p>[Fechamento convidativo.]</p>\n\n<p><em>Texto original: [Fonte/Assessoria citada no input], adaptado pela equipe +blog.</em></p>\n",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "id": "f4860661-05de-469c-9ed7-53448b6eea01",
+      "name": "AI Reescreve +blog",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        80,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "title": "={{ $json.message.content }}",
+        "additionalFields": {
+          "content": "={{ $('AI Reescreve +blog').item.json.output }}"
+        }
+      },
+      "id": "1ca900d6-a6b8-4527-9c16-2e6fb5468746",
+      "name": "Salvar Rascunho no WordPress",
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [
+        736,
+        0
+      ],
+      "credentials": {
+        "wordpressApi": {
+          "id": "oQEanI57VyWcGmoy",
+          "name": "Wordpress +blog"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4.1-MINI"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Crie um título para o artigo que será produzido. \n\nAqui está o artigo:\n{{ $json.output }}\n\n## Formato de Saída\nForneça o título em texto simples, sem aspas, e com apenas a primeira letra da primeira palavra em maiúscula.\n\nExemplo: 'AMERIAFRO 2025: Arte e Cultura Afro-Brasileira pulsando na 5ª edição da feira'"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        400,
+        0
+      ],
+      "id": "2b16c081-d4f8-4c00-9ecd-74f6442c0a76",
+      "name": "TITULO",
+      "credentials": {
+        "openAiApi": {
+          "id": "euPCX6OAy5nmYeVW",
+          "name": "OpenAi TOIN"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "deepseek/deepseek-chat",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        32,
+        208
+      ],
+      "id": "da487fb7-4f45-4271-8509-fda869b9aea8",
+      "name": "OpenRouter Chat Model",
+      "credentials": {
+        "openRouterApi": {
+          "id": "0vpyNTie2sZ7Oo6R",
+          "name": "OpenRouter TOIN"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -160,
+        368
+      ],
+      "id": "6581907c-5a2a-49ce-a7ff-a2ffc9f50d82",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "euPCX6OAy5nmYeVW",
+          "name": "OpenAi TOIN"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $('Gmail +blog').item.json.id }}",
+        "simple": false,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -144,
+        -80
+      ],
+      "id": "c47ad3c7-b9f4-469e-a9cf-5615e57ff6d7",
+      "name": "Get a message",
+      "webhookId": "8a4006c7-19d5-465c-b869-aa78e462ebb4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "XTHAM8lWpYQNQfFw",
+          "name": "Gmail +blog"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -880,
+        16
+      ],
+      "id": "3b069788-14c9-42bc-9d50-5fd01bf65fb3",
+      "name": "Gmail +blog",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "XTHAM8lWpYQNQfFw",
+          "name": "Gmail +blog"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Email IMAP": {
+      "main": [
+        []
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Filtro Temático",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Filtro Temático": {
+      "main": [
+        [
+          {
+            "node": "É Relevante?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "É Relevante?": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Reescreve +blog": {
+      "main": [
+        [
+          {
+            "node": "TITULO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TITULO": {
+      "main": [
+        [
+          {
+            "node": "Salvar Rascunho no WordPress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Reescreve +blog",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        []
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "AI Reescreve +blog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail +blog": {
+      "main": [
+        [
+          {
+            "node": "AI Filtro Temático",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "736e0941-4722-4f9a-95c0-39b78f510eb6",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7f605995a2d5cc1a69c5631358e67940256b73d6dc9a6ce7888ef0c6f4125eed"
+  },
+  "id": "DTDdv7vL3sXipIcE",
+  "tags": []
+}

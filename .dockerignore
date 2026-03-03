@@ -1,0 +1,10 @@
+.env
+.git
+.tmp
+__pycache__
+*.pyc
+*.pyo
+.venv
+venv
+token.json
+token_sheets.json
