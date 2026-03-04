@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libpng-dev \
     libwebp-dev \
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
 # Copia e instala dependências Python
@@ -26,4 +27,6 @@ RUN mkdir -p .tmp
 # Variáveis de ambiente são injetadas via .env ou env_file no docker-compose
 # Não copie .env para a imagem
 
-CMD ["python", "execution/telegram_bot.py"]
+RUN chmod +x /app/start.sh
+
+CMD ["/app/start.sh"]

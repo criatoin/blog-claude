@@ -1,0 +1,6 @@
+# Cron jobs do +blog — rodam dentro do container
+# Releases: toda hora, seg-sex, 8h-18h (guard no script limita ao horário)
+0 * * * 1-5 python /app/execution/run_releases.py >> /proc/1/fd/1 2>&1
+
+# Pauta: toda segunda às 9h
+0 9 * * 1 python /app/execution/run_pauta_generate.py >> /proc/1/fd/1 2>&1
