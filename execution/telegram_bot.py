@@ -27,11 +27,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Guard: só roda no container de produção (Coolify define RUN_ENV=production)
-if os.getenv("RUN_ENV") != "production":
-    print("[bot] RUN_ENV != production — execute apenas via Coolify. Encerrando.")
-    sys.exit(0)
-
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
 
