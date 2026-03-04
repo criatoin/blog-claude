@@ -28,6 +28,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Guard: roda apenas em dias úteis (seg-sex) entre 8h e 18h
+from datetime import datetime
+_now = datetime.now()
+if _now.weekday() >= 5 or not (8 <= _now.hour < 18):
+    print(f"[releases] Fora do horário operacional ({_now.strftime('%a %H:%M')}). Encerrando.")
+    sys.exit(0)
+
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
 IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")

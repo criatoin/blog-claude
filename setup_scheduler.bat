@@ -21,8 +21,7 @@ REM ── 1. Processar releases — toda hora, dias úteis, 8h-18h ────
 echo [1/3] Criando tarefa BlogReleases...
 schtasks /create /tn "BlogReleases" ^
   /tr "\"%PYTHON%\" \"%PROJECT_DIR%\execution\run_releases.py\"" ^
-  /sc hourly /mo 1 /st 08:00 /et 18:00 /k ^
-  /d MON,TUE,WED,THU,FRI ^
+  /sc hourly /mo 1 /st 08:00 ^
   /rl HIGHEST ^
   /f
 if %errorlevel% equ 0 (
