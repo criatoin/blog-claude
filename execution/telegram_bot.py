@@ -139,7 +139,7 @@ def _handle_produce(pauta_id: str, cb_id: str, msg_id: str) -> None:
 
     # Lança produção em background (não bloqueia o loop)
     subprocess.Popen(
-        ["python", str(SCRIPT_DIR / "run_pauta_produce.py"), "--pauta-id", pauta_id],
+        ["python3", str(SCRIPT_DIR / "run_pauta_produce.py"), "--pauta-id", pauta_id],
         cwd=str(PROJECT_DIR),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -198,7 +198,13 @@ def run_bot() -> None:
             )
 
             if not result.get("ok"):
-                time.sleep(5)
+                error_code = result.get("error_code", 0)
+                if error_code == 409:
+                    wait = POLL_TIMEOUT + 5
+                    print(f"[bot] 409 Conflict — aguardando {wait}s para instância anterior expirar...", file=sys.stderr)
+                    time.sleep(wait)
+                else:
+                    time.sleep(5)
                 continue
 
             updates = result.get("result", [])
