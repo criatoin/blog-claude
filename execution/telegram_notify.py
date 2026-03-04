@@ -2,6 +2,9 @@
 telegram_notify.py — Envia notificações para o Telegram com botões inline
 e processa as respostas ([✅ Site] / [📸 Instagram] / [🗑 Descartar]).
 
+Botão Instagram: marca status "Aprovado" na aba Legendas IG da planilha.
+O usuário posta manualmente a partir da planilha (sem API do Instagram).
+
 Autenticação: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID no .env
 
 Uso:
@@ -393,34 +396,14 @@ def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
         )
 
     elif action == "publish_ig":
-        ig_result = subprocess.run(
-            ["python3", str(script_dir / "instagram_post.py"), "post",
-             "--image-path", ig_image_path,
-             "--caption", ig_caption,
-             "--title", f"Post #{post_id}"],
-            capture_output=True, text=True,
-        )
-        try:
-            ig_data = json.loads(ig_result.stdout) if ig_result.returncode == 0 else {}
-        except json.JSONDecodeError:
-            ig_data = {}
-
-        if ig_data.get("ok"):
-            ig_url = ig_data.get("url", "")
-            cmd_send_text(f"📸 <b>Postado no Instagram!</b>\n{ig_url}" if ig_url
-                          else f"📸 Post #{post_id} publicado no Instagram.")
-            new_status = "Publicado IG"
-        else:
-            err = ig_data.get("error", ig_result.stderr.strip())
-            cmd_send_text(f"⚠️ Erro ao postar no Instagram: {err}")
-            new_status = "Erro IG"
-
-        # Atualiza aba Legendas IG com o status
+        # Apenas marca como Aprovado na planilha — o usuário posta manualmente
+        new_status = "Aprovado"
         subprocess.run(
             ["python3", str(script_dir / "sheets_write.py"), "update-status",
              "--tab", "Legendas IG", "--row-id", str(post_id), "--status", new_status],
             capture_output=True,
         )
+        cmd_send_text(f"📸 Post #{post_id} aprovado para Instagram. Confira a planilha Legendas IG.")
 
     else:  # discard
         subprocess.run(
