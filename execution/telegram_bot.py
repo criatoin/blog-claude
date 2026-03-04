@@ -233,11 +233,9 @@ def run_bot() -> None:
             if not result.get("ok"):
                 error_code = result.get("error_code", 0)
                 if error_code == 409:
-                    print("[bot] 409 Conflict — matando sessões concorrentes via webhook...", file=sys.stderr)
-                    _api("setWebhook", json={"url": "https://example.com/kill"})
-                    time.sleep(2)
-                    _api("deleteWebhook", json={})
-                    time.sleep(3)
+                    print("[bot] 409 Conflict — removendo webhook e aguardando...", file=sys.stderr)
+                    _api("deleteWebhook", json={"drop_pending_updates": False})
+                    time.sleep(10)
                 else:
                     time.sleep(5)
                 continue
