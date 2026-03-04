@@ -20,5 +20,16 @@ crontab /app/crontab
 # ── Inicia o cron daemon em background ────────────────────────────────────
 cron
 
+# ── Limpa webhook antes de iniciar (evita 409 de containers anteriores) ────
+python3 -c "
+import os, requests, time
+token = os.getenv('TELEGRAM_BOT_TOKEN','')
+if token:
+    requests.post(f'https://api.telegram.org/bot{token}/deleteWebhook',
+                  json={'drop_pending_updates': False}, timeout=10)
+    print('[start] deleteWebhook executado')
+    time.sleep(5)
+"
+
 # ── Inicia o bot Telegram em foreground (mantém o container vivo) ──────────
-exec python /app/execution/telegram_bot.py
+exec python3 /app/execution/telegram_bot.py
