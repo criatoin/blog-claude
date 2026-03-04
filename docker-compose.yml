@@ -5,9 +5,9 @@
 #   docker-compose up --build
 #
 # Em produção (Coolify):
-#   - telegram-bot: deploy como serviço com restart: always
-#   - run-releases: configurar cron no painel Coolify: "0 8-18 * * 1-5"
-#   - run-pauta: configurar cron no painel Coolify: "0 9 * * 1"
+#   - Apenas o serviço telegram-bot precisa ser deployado
+#   - Os cron jobs (releases/pauta) rodam via crontab dentro do container
+#   - O start.sh reconstrói os tokens OAuth de GMAIL_TOKEN_B64 e SHEETS_TOKEN_B64
 #
 # IMPORTANTE: Nunca commite o arquivo .env. Configure as variáveis
 #             pelo painel do Coolify (Environment Variables).
@@ -16,43 +16,20 @@ version: "3.9"
 
 services:
 
-  # ── Bot Telegram — daemon permanente ──────────────────────────────────────
+  # ── Bot Telegram + Cron — serviço único permanente ────────────────────────
+  # Contém: bot daemon (foreground) + cron jobs internos (background)
+  # start.sh: reconstrói tokens → instala crontab → sobe cron → sobe bot
   telegram-bot:
     build: .
-    command: python execution/telegram_bot.py
     restart: always
     env_file: .env
     volumes:
       - blog_tmp:/app/.tmp
-      - ./token.json:/app/token.json
-      - ./token_sheets.json:/app/token_sheets.json
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-  # ── Pipeline de releases — cron: toda hora (seg-sex, 8h-18h) ──────────────
-  # No Coolify: adicionar cron job com expressão "0 8-18 * * 1-5"
-  run-releases:
-    build: .
-    command: python execution/run_releases.py
-    env_file: .env
-    volumes:
-      - blog_tmp:/app/.tmp
-      - ./token.json:/app/token.json
-      - ./token_sheets.json:/app/token_sheets.json
-
-  # ── Pipeline de pauta — cron: toda segunda às 9h ──────────────────────────
-  # No Coolify: adicionar cron job com expressão "0 9 * * 1"
-  run-pauta:
-    build: .
-    command: python execution/run_pauta_generate.py
-    env_file: .env
-    volumes:
-      - blog_tmp:/app/.tmp
-      - ./token.json:/app/token.json
-      - ./token_sheets.json:/app/token_sheets.json
 
 volumes:
   blog_tmp:
