@@ -107,14 +107,16 @@ def _send_text(message: str) -> None:
     })
 
 
-def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str) -> dict:
+def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
+                    ig_image_path: str = "", ig_caption: str = "") -> dict:
     """
-    Executa Publicar ou Descartar.
-    Importa _execute_action de telegram_notify para reutilizar a lógica.
+    Executa Publicar (site), Publicar IG ou Descartar.
+    Delega para _execute_action de telegram_notify.
     """
     sys.path.insert(0, str(SCRIPT_DIR))
     from telegram_notify import _execute_action as _notify_execute
-    return _notify_execute(action, post_id, sheets_row_id, user)
+    return _notify_execute(action, post_id, sheets_row_id, user,
+                           ig_image_path=ig_image_path, ig_caption=ig_caption)
 
 
 def _handle_produce(pauta_id: str, cb_id: str, msg_id: str) -> None:
@@ -149,8 +151,9 @@ def _handle_produce(pauta_id: str, cb_id: str, msg_id: str) -> None:
 def _handle_approval(action: str, post_id: int, sheets_row_id: str,
                      cb_id: str, msg_id: str, user: str) -> None:
     """
-    Captura callbacks publish:id:row / discard:id:row.
+    Captura callbacks publish:id:row / publish_ig:id:row / discard:id:row.
     Só processa se msg_id estiver nos pendentes.
+    Suporta ações parciais: botões clicados somem, restantes permanecem.
     """
     pending = _load_json(PENDING_FILE)
     if msg_id not in pending:
@@ -158,24 +161,54 @@ def _handle_approval(action: str, post_id: int, sheets_row_id: str,
         _api("answerCallbackQuery", json={"callback_query_id": cb_id, "text": "Este card já foi processado."})
         return
 
+    entry = pending[msg_id]
+
     # Responde ao Telegram antes de executar
-    feedback = "✅ Publicando..." if action == "publish" else "🗑 Descartando..."
+    feedback_map = {
+        "publish": "✅ Publicando no site...",
+        "publish_ig": "📸 Postando no Instagram...",
+        "discard": "🗑 Descartando...",
+    }
+    feedback = feedback_map.get(action, "Processando...")
     _api("answerCallbackQuery", json={"callback_query_id": cb_id, "text": feedback})
 
     # Executa ação
-    _execute_action(action, post_id, sheets_row_id, user)
+    _execute_action(action, post_id, sheets_row_id, user,
+                    ig_image_path=entry.get("ig_image_path", ""),
+                    ig_caption=entry.get("ig_caption", ""))
 
-    # Remove botões do card
-    _api("editMessageReplyMarkup", json={
-        "chat_id": _chat_id(),
-        "message_id": int(msg_id),
-        "reply_markup": json.dumps({"inline_keyboard": []}),
-    })
+    if action == "discard":
+        # Remove todos os botões e o pending
+        _api("editMessageReplyMarkup", json={
+            "chat_id": _chat_id(),
+            "message_id": int(msg_id),
+            "reply_markup": json.dumps({"inline_keyboard": []}),
+        })
+        pending = _load_json(PENDING_FILE)
+        pending.pop(msg_id, None)
+        _save_json(PENDING_FILE, pending)
+    else:
+        # Atualiza flag e reconstrói teclado sem o botão clicado
+        pending = _load_json(PENDING_FILE)
+        if msg_id in pending:
+            if action == "publish":
+                pending[msg_id]["published_site"] = True
+            elif action == "publish_ig":
+                pending[msg_id]["published_ig"] = True
 
-    # Remove dos pendentes
-    pending = _load_json(PENDING_FILE)
-    pending.pop(msg_id, None)
-    _save_json(PENDING_FILE, pending)
+            sys.path.insert(0, str(SCRIPT_DIR))
+            from telegram_notify import _build_remaining_buttons
+            remaining = _build_remaining_buttons(pending[msg_id])
+
+            _api("editMessageReplyMarkup", json={
+                "chat_id": _chat_id(),
+                "message_id": int(msg_id),
+                "reply_markup": json.dumps({"inline_keyboard": remaining}),
+            })
+
+            if not remaining:
+                pending.pop(msg_id, None)
+            _save_json(PENDING_FILE, pending)
 
 
 # ─── Loop principal ────────────────────────────────────────────────────────────

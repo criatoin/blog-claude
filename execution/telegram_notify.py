@@ -1,18 +1,20 @@
 """
 telegram_notify.py — Envia notificações para o Telegram com botões inline
-e processa as respostas ([Publicar] / [Descartar]).
+e processa as respostas ([✅ Site] / [📸 Instagram] / [🗑 Descartar]).
 
 Autenticação: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID no .env
 
 Uso:
-    # Envia card de aprovação de release
+    # Envia card de aprovação de release (com botão IG opcional)
     python execution/telegram_notify.py send-release \
         --post-id 123 \
         --title "Título do post" \
         --summary "Resumo em 2-3 linhas" \
         --edit-url "https://maisblog.com.br/wp-admin/..." \
         --cover ".tmp/slug_cover.webp" \
-        --sheets-row-id 1
+        --sheets-row-id 1 \
+        [--ig-image ".tmp/slug_ig.webp"] \
+        [--ig-caption "Legenda IG. #hashtag"]
 
     # Envia mensagem de texto simples
     python execution/telegram_notify.py send-text --message "Texto aqui"
@@ -83,23 +85,51 @@ def _save_pending(data: dict) -> None:
     PENDING_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# ─── Helper de botões restantes ───────────────────────────────────────────────
+
+def _build_remaining_buttons(entry: dict) -> list[list[dict]]:
+    """
+    Reconstrói a linha de botões com base nos flags published_site / published_ig.
+    Regra: Descartar desaparece assim que Site ou IG forem publicados.
+    Retorna lista de linhas (inline_keyboard) — pode ser vazia se não sobrar nada.
+    """
+    post_id = entry["post_id"]
+    row_id = entry["sheets_row_id"]
+    published_site = entry.get("published_site", False)
+    published_ig = entry.get("published_ig", False)
+    has_ig = bool(entry.get("ig_image_path", ""))
+
+    row = []
+    if not published_site:
+        row.append({"text": "✅ Site", "callback_data": f"publish:{post_id}:{row_id}"})
+    if has_ig and not published_ig:
+        row.append({"text": "📸 Instagram", "callback_data": f"publish_ig:{post_id}:{row_id}"})
+
+    # Descartar só aparece enquanto nenhuma publicação foi feita
+    if not published_site and not published_ig:
+        row.append({"text": "🗑 Descartar", "callback_data": f"discard:{post_id}:{row_id}"})
+
+    return [row] if row else []
+
+
 # ─── Comandos ─────────────────────────────────────────────────────────────────
 
 def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
-                     cover: str, sheets_row_id: str) -> dict:
-    """Envia card de aprovação com imagem, resumo e botões Publicar/Descartar."""
+                     cover: str, sheets_row_id: str,
+                     ig_image_path: str = "", ig_caption: str = "") -> dict:
+    """Envia card de aprovação com imagem, resumo e botões Site/Instagram/Descartar."""
     caption = (
         f"📰 *{_escape(title)}*\n\n"
         f"{_escape(summary)}\n\n"
         f"[Editar rascunho]({edit_url})"
     )
 
-    keyboard = {
-        "inline_keyboard": [[
-            {"text": "✅ Publicar", "callback_data": f"publish:{post_id}:{sheets_row_id}"},
-            {"text": "🗑 Descartar", "callback_data": f"discard:{post_id}:{sheets_row_id}"},
-        ]]
-    }
+    # Monta botões: Site sempre presente; IG só se tiver imagem
+    row = [{"text": "✅ Site", "callback_data": f"publish:{post_id}:{sheets_row_id}"}]
+    if ig_image_path:
+        row.append({"text": "📸 Instagram", "callback_data": f"publish_ig:{post_id}:{sheets_row_id}"})
+    row.append({"text": "🗑 Descartar", "callback_data": f"discard:{post_id}:{sheets_row_id}"})
+    keyboard = {"inline_keyboard": [row]}
 
     cover_path = Path(cover)
     if cover_path.exists():
@@ -128,12 +158,16 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
 
     if result.get("ok"):
         msg_id = result["result"]["message_id"]
-        # Registra aprovação pendente
+        # Registra aprovação pendente com schema estendido
         pending = _load_pending()
         pending[str(msg_id)] = {
             "post_id": post_id,
             "sheets_row_id": sheets_row_id,
             "title": title,
+            "ig_image_path": ig_image_path,
+            "ig_caption": ig_caption,
+            "published_site": False,
+            "published_ig": False,
         }
         _save_pending(pending)
         print(f"Card enviado. message_id={msg_id}", file=sys.stderr)
@@ -270,32 +304,62 @@ def cmd_listen(timeout_secs: int = 1800) -> dict:
             user = cb["from"].get("first_name", "alguém")
 
             # Só processa se este card está na lista de pendentes
-            # (ignora cliques em cards antigos/já processados)
             pending = _load_pending()
             if msg_id not in pending:
                 print(f"Callback ignorado: msg_id={msg_id} não está nos pendentes.", file=sys.stderr)
                 continue
 
+            entry = pending[msg_id]
+
             # Responde o Telegram ANTES de executar a ação (janela de 60s)
-            feedback_text = "✅ Publicando..." if action == "publish" else "🗑 Descartando..."
+            feedback_map = {
+                "publish": "✅ Publicando no site...",
+                "publish_ig": "📸 Postando no Instagram...",
+                "discard": "🗑 Descartando...",
+            }
+            feedback_text = feedback_map.get(action, "Processando...")
             try:
                 _api("answerCallbackQuery", json={"callback_query_id": cb_id,
                                                    "text": feedback_text})
             except Exception:
                 pass
 
-            result_action = _execute_action(action, post_id, sheets_row_id, user)
+            result_action = _execute_action(
+                action, post_id, sheets_row_id, user,
+                ig_image_path=entry.get("ig_image_path", ""),
+                ig_caption=entry.get("ig_caption", ""),
+            )
             processed.append(result_action)
-            _api("editMessageReplyMarkup", json={
-                "chat_id": _chat_id(),
-                "message_id": int(msg_id),
-                "reply_markup": json.dumps({"inline_keyboard": []}),
-            })
 
-            # Remove da lista de pendentes
-            pending = _load_pending()
-            pending.pop(msg_id, None)
-            _save_pending(pending)
+            if action == "discard":
+                # Remove todos os botões e o pending
+                _api("editMessageReplyMarkup", json={
+                    "chat_id": _chat_id(),
+                    "message_id": int(msg_id),
+                    "reply_markup": json.dumps({"inline_keyboard": []}),
+                })
+                pending = _load_pending()
+                pending.pop(msg_id, None)
+                _save_pending(pending)
+            else:
+                # Atualiza flag e reconstrói teclado sem o botão clicado
+                pending = _load_pending()
+                if msg_id in pending:
+                    if action == "publish":
+                        pending[msg_id]["published_site"] = True
+                    elif action == "publish_ig":
+                        pending[msg_id]["published_ig"] = True
+
+                    remaining_buttons = _build_remaining_buttons(pending[msg_id])
+                    _api("editMessageReplyMarkup", json={
+                        "chat_id": _chat_id(),
+                        "message_id": int(msg_id),
+                        "reply_markup": json.dumps({"inline_keyboard": remaining_buttons}),
+                    })
+
+                    if not remaining_buttons:
+                        pending.pop(msg_id, None)
+                    _save_pending(pending)
 
         # Se não há mais pendentes, encerra
         if not _load_pending():
@@ -305,34 +369,73 @@ def cmd_listen(timeout_secs: int = 1800) -> dict:
     return {"processed": processed}
 
 
-def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str) -> dict:
-    """Executa Publicar ou Descartar e atualiza o Sheets."""
+def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
+                    ig_image_path: str = "", ig_caption: str = "") -> dict:
+    """Executa Publicar (site), Publicar IG ou Descartar e atualiza o Sheets."""
     import subprocess
     script_dir = Path(__file__).parent
 
     if action == "publish":
         wp_result = subprocess.run(
-            ["python", str(script_dir / "wp_publish.py"), "publish", "--post-id", str(post_id)],
+            ["python3", str(script_dir / "wp_publish.py"), "publish", "--post-id", str(post_id)],
             capture_output=True, text=True,
         )
         wp_data = json.loads(wp_result.stdout) if wp_result.returncode == 0 else {}
         new_status = "Publicado"
         url = wp_data.get("url", "")
         cmd_send_text(f"✅ <b>Publicado!</b>\n{url}" if url else f"✅ Post #{post_id} publicado.")
-    else:
+
+        # Atualiza Sheets
         subprocess.run(
-            ["python", str(script_dir / "wp_publish.py"), "trash", "--post-id", str(post_id)],
+            ["python3", str(script_dir / "sheets_write.py"), "update-status",
+             "--tab", "Log Releases", "--row-id", sheets_row_id, "--status", new_status],
+            capture_output=True,
+        )
+
+    elif action == "publish_ig":
+        ig_result = subprocess.run(
+            ["python3", str(script_dir / "instagram_post.py"), "post",
+             "--image-path", ig_image_path,
+             "--caption", ig_caption,
+             "--title", f"Post #{post_id}"],
+            capture_output=True, text=True,
+        )
+        try:
+            ig_data = json.loads(ig_result.stdout) if ig_result.returncode == 0 else {}
+        except json.JSONDecodeError:
+            ig_data = {}
+
+        if ig_data.get("ok"):
+            ig_url = ig_data.get("url", "")
+            cmd_send_text(f"📸 <b>Postado no Instagram!</b>\n{ig_url}" if ig_url
+                          else f"📸 Post #{post_id} publicado no Instagram.")
+            new_status = "Publicado IG"
+        else:
+            err = ig_data.get("error", ig_result.stderr.strip())
+            cmd_send_text(f"⚠️ Erro ao postar no Instagram: {err}")
+            new_status = "Erro IG"
+
+        # Atualiza aba Legendas IG com o status
+        subprocess.run(
+            ["python3", str(script_dir / "sheets_write.py"), "update-status",
+             "--tab", "Legendas IG", "--row-id", str(post_id), "--status", new_status],
+            capture_output=True,
+        )
+
+    else:  # discard
+        subprocess.run(
+            ["python3", str(script_dir / "wp_publish.py"), "trash", "--post-id", str(post_id)],
             capture_output=True, text=True,
         )
         new_status = "Descartado"
         cmd_send_text(f"🗑 Post #{post_id} descartado por {user}.")
 
-    # Atualiza Sheets
-    subprocess.run(
-        ["python", str(script_dir / "sheets_write.py"), "update-status",
-         "--tab", "Log Releases", "--row-id", sheets_row_id, "--status", new_status],
-        capture_output=True,
-    )
+        # Atualiza Sheets
+        subprocess.run(
+            ["python3", str(script_dir / "sheets_write.py"), "update-status",
+             "--tab", "Log Releases", "--row-id", sheets_row_id, "--status", new_status],
+            capture_output=True,
+        )
 
     return {"post_id": post_id, "action": action, "status": new_status}
 
@@ -372,6 +475,8 @@ def main() -> None:
     p_sr.add_argument("--edit-url", required=True)
     p_sr.add_argument("--cover", required=True)
     p_sr.add_argument("--sheets-row-id", required=True)
+    p_sr.add_argument("--ig-image", default="", help="Caminho da imagem IG (opcional)")
+    p_sr.add_argument("--ig-caption", default="", help="Legenda IG (opcional)")
     p_sr.add_argument("--listen", action="store_true",
                        help="Inicia listener imediatamente após enviar (recomendado)")
     p_sr.add_argument("--listen-timeout", type=int, default=1800,
@@ -396,6 +501,8 @@ def main() -> None:
         result = cmd_send_release(
             args.post_id, args.title, args.summary,
             args.edit_url, args.cover, args.sheets_row_id,
+            ig_image_path=args.ig_image,
+            ig_caption=args.ig_caption,
         )
         # Inicia listener imediatamente no mesmo processo se --listen passado
         if args.listen and result.get("ok"):

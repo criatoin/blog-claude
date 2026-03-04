@@ -323,7 +323,7 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         ])
 
     # 8. Notifica Telegram (SEM --listen — bot daemon cuida dos callbacks)
-    _run([
+    notify_args = [
         str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
         "--post-id", str(post_id),
         "--title", titulo,
@@ -331,7 +331,10 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         "--edit-url", edit_url,
         "--cover", cover_path or "",
         "--sheets-row-id", sheets_row_id,
-    ])
+    ]
+    if ig_path:
+        notify_args += ["--ig-image", ig_path, "--ig-caption", legenda]
+    _run(notify_args)
 
     print(f"[run_releases]   ✅ Rascunho #{post_id} criado. Card enviado ao Telegram.", file=sys.stderr)
 
