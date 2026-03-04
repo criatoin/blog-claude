@@ -5,8 +5,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Timezone: Brasília (UTC-3)
+ENV TZ=America/Sao_Paulo
+
 # Dependências do sistema necessárias para Pillow e outras libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
     gcc \
     libjpeg-dev \
     libpng-dev \

@@ -28,7 +28,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Guard: roda apenas em dias úteis (seg-sex) entre 8h e 18h
+# Guard: só roda no container de produção (Coolify define RUN_ENV=production)
+if os.getenv("RUN_ENV") != "production":
+    print("[releases] RUN_ENV != production — execute apenas via Coolify. Encerrando.")
+    sys.exit(0)
+
+# Guard: roda apenas em dias úteis (seg-sex) entre 8h e 18h (horário de Brasília via TZ do container)
 from datetime import datetime
 _now = datetime.now()
 if _now.weekday() >= 5 or not (8 <= _now.hour < 18):
