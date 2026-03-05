@@ -14,6 +14,10 @@ if [ -n "$SHEETS_TOKEN_B64" ]; then
     echo "[start] token_sheets.json reconstituído de SHEETS_TOKEN_B64"
 fi
 
+# ── Exporta env vars para .env (cron não herda variáveis do container) ────
+printenv | grep -v "^_=" | grep -v "^SHLVL=" | grep -v "^PWD=" > /app/.env
+echo "[start] .env gerado com $(wc -l < /app/.env) variáveis para o cron"
+
 # ── Instala crontab ────────────────────────────────────────────────────────
 crontab /app/crontab
 
