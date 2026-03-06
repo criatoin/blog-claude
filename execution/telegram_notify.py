@@ -178,11 +178,14 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
         # Envia a imagem IG como segunda mensagem para visualização
         ig_path = Path(ig_image_path)
         if ig_image_path and ig_path.exists():
-            caption_preview = (ig_caption[:1000] + "…") if len(ig_caption) > 1000 else ig_caption
+            # Telegram limita caption de foto a 1024 chars — truncar antes de escapar
+            caption_preview = (ig_caption[:500] + "…") if len(ig_caption) > 500 else ig_caption
             ig_caption_text = f"📸 *Arte Instagram — Post \\#{post_id}*\n\n{_escape(caption_preview)}"
+            if len(ig_caption_text) > 1024:
+                ig_caption_text = ig_caption_text[:1021] + "…"
             try:
                 with ig_path.open("rb") as f:
-                    _api(
+                    result_ig = _api(
                         "sendPhoto",
                         data={
                             "chat_id": _chat_id(),
@@ -191,9 +194,14 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
                         },
                         files={"photo": f},
                     )
-                print(f"Imagem IG enviada ao Telegram.", file=sys.stderr)
+                if result_ig.get("ok"):
+                    print(f"Imagem IG enviada ao Telegram.", file=sys.stderr)
+                else:
+                    print(f"Aviso: Telegram rejeitou imagem IG: {result_ig}", file=sys.stderr)
             except Exception as e:
                 print(f"Aviso: falha ao enviar imagem IG ao Telegram: {e}", file=sys.stderr)
+        elif ig_image_path and not ig_path.exists():
+            print(f"Aviso: imagem IG não encontrada em disco: {ig_image_path}", file=sys.stderr)
 
         return {"ok": True, "message_id": msg_id}
     else:

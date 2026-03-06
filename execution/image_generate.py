@@ -235,14 +235,36 @@ def _try_openai(query: str, slug: str, output_dir: str) -> dict | None:
 
 # ─── Orquestrador ─────────────────────────────────────────────────────────────
 
+def _try_pil_placeholder(slug: str, output_dir: str) -> dict | None:
+    """Último recurso: gera imagem placeholder sólida via PIL (sem API). Sempre funciona."""
+    try:
+        from PIL import Image as PILImage
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        img = PILImage.new("RGB", (1920, 1080), color=(45, 55, 72))
+        raw_path = str(out_dir / f"{slug}_raw.jpg")
+        img.save(raw_path, format="JPEG", quality=85)
+        cover_path = _process_to_cover(raw_path, slug, output_dir)
+        print(f"Placeholder PIL gerado como fallback final.", file=sys.stderr)
+        return {"path": cover_path, "source": "placeholder", "credit": ""}
+    except Exception as e:
+        print(f"Placeholder PIL falhou: {e}", file=sys.stderr)
+        return None
+
+
 def generate_image(query: str, slug: str, output_dir: str = ".tmp") -> dict:
-    """Tenta Unsplash → Gemini → OpenAI. Retorna resultado da primeira que funcionar."""
+    """Tenta Unsplash → Gemini → OpenAI → placeholder PIL. Retorna resultado da primeira que funcionar."""
     for attempt in [_try_unsplash, _try_gemini, _try_openai]:
         result = attempt(query, slug, output_dir)
         if result:
             return result
 
-    print("Erro: todas as tentativas de geração de imagem falharam.", file=sys.stderr)
+    print("Aviso: todas as fontes de imagem falharam. Usando placeholder PIL.", file=sys.stderr)
+    result = _try_pil_placeholder(slug, output_dir)
+    if result:
+        return result
+
+    print("Erro crítico: nem o placeholder PIL funcionou.", file=sys.stderr)
     sys.exit(1)
 
 

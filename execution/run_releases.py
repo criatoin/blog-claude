@@ -49,6 +49,25 @@ def _load_processed() -> set:
     return set()
 
 
+def _load_processed_from_sheets() -> set:
+    """
+    Lê Log Releases do Sheets e retorna set de (assunto_lower, sender_lower) já processados.
+    Serve como dedup persistente: sobrevive ao restart do container mesmo sem processed_emails.json.
+    """
+    try:
+        result = _run_json([str(SCRIPT_DIR / "sheets_read.py"), "log"])
+        if not result:
+            return set()
+        return {
+            (r.get("assunto", "").strip().lower(), r.get("origem_email", "").strip().lower())
+            for r in result
+            if r.get("status") not in ("Descartado",)
+        }
+    except Exception as e:
+        print(f"[run_releases] Aviso: falha ao carregar dedup do Sheets: {e}", file=sys.stderr)
+        return set()
+
+
 def _mark_processed(email_id: str) -> None:
     processed = _load_processed()
     processed.add(email_id)
@@ -270,17 +289,24 @@ def _pipeline_imagem(email: dict, slug: str) -> str | None:
     return None
 
 
-def processar_email(email: dict, dry_run: bool = False) -> dict:
+def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
     """Processa um email pelo pipeline completo. Retorna dict com resultado."""
     email_id = email.get("id", "?")
     subject = email.get("subject", "")
     sender = email.get("sender", "")
     date = email.get("date", "")
 
-    # Deduplicação: pula emails já processados em runs anteriores
+    # Deduplicação 1: arquivo local (rápido, perdido no restart)
     if not dry_run and email_id in _load_processed():
-        print(f"\n[run_releases] → Já processado, pulando: {subject[:60]}", file=sys.stderr)
+        print(f"\n[run_releases] → Já processado (arquivo), pulando: {subject[:60]}", file=sys.stderr)
         return {"email_id": email_id, "relevante": False, "motivo": "Já processado anteriormente"}
+
+    # Deduplicação 2: Sheets (persistente entre restarts do container)
+    if not dry_run and processed_subjects is not None:
+        key = (subject.strip().lower(), sender.strip().lower())
+        if key in processed_subjects:
+            print(f"\n[run_releases] → Já na planilha, pulando: {subject[:60]}", file=sys.stderr)
+            return {"email_id": email_id, "relevante": False, "motivo": "Já registrado na planilha"}
 
     print(f"\n[run_releases] → Processando: {subject[:60]}", file=sys.stderr)
 
@@ -412,7 +438,10 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     ]
     if ig_path:
         notify_args += ["--ig-image", ig_path, "--ig-caption", legenda]
-    _run(notify_args)
+    notify_result = _run(notify_args)
+    if notify_result.returncode != 0:
+        print(f"[run_releases]   Aviso: telegram_notify falhou (código {notify_result.returncode}):\n"
+              f"{notify_result.stderr[:500]}", file=sys.stderr)
 
     print(f"[run_releases]   ✅ Rascunho #{post_id} criado. Card enviado ao Telegram.", file=sys.stderr)
 
@@ -450,9 +479,13 @@ def main() -> None:
         print("[run_releases] Nenhum email novo. Encerrando.", file=sys.stderr)
         sys.exit(0)
 
+    # Carrega dedup persistente do Sheets uma única vez (evita chamada por email)
+    processed_subjects = _load_processed_from_sheets()
+    print(f"[run_releases] {len(processed_subjects)} entradas já na planilha (dedup persistente).", file=sys.stderr)
+
     resultados = []
     for email in emails:
-        resultado = processar_email(email, dry_run=args.dry_run)
+        resultado = processar_email(email, dry_run=args.dry_run, processed_subjects=processed_subjects)
         resultados.append(resultado)
 
     # Resumo
