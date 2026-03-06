@@ -39,6 +39,23 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
 IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")
 OUTPUT_DIR = str(PROJECT_DIR / ".tmp")
+PROCESSED_FILE = PROJECT_DIR / ".tmp" / "processed_emails.json"
+VALID_CATEGORY_IDS = {10, 11, 12, 13, 19, 22, 23, 384, 533, 540, 561}
+
+
+def _load_processed() -> set:
+    if PROCESSED_FILE.exists():
+        return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
+    return set()
+
+
+def _mark_processed(email_id: str) -> None:
+    processed = _load_processed()
+    processed.add(email_id)
+    if len(processed) > 500:
+        processed = set(list(processed)[-500:])
+    PROCESSED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROCESSED_FILE.write_text(json.dumps(list(processed), ensure_ascii=False), encoding="utf-8")
 
 
 def _run(args: list[str], capture: bool = True) -> subprocess.CompletedProcess:
@@ -102,23 +119,69 @@ def _llm_reescrever(email: dict) -> dict:
     """Reescreve o email como post do +blog."""
     from llm_call import llm_call_json
 
-    system = """Você é o editor do +blog, portal de cultura e diversão de Americana, SBO, Nova Odessa e Sumaré.
+    system = """Você é o editor do +blog, portal de cultura e diversão de Americana, Santa Bárbara d'Oeste (SBO), Nova Odessa e Sumaré.
 
-Tom: Natural e direto. Frases curtas. Parágrafos de 2-3 linhas. Sem juridiquês, sem corporativês, sem emoji.
-Nunca inventar dados — use [DADO AUSENTE: descrição] se faltar informação.
+IDENTIDADE EDITORIAL:
+Tom natural e direto — escreva como quem conta uma novidade para um amigo da cidade.
+Frases curtas. Parágrafos de 2–3 linhas (nunca parágrafos de 1 linha só).
+Proibido: "no que tange", "haja vista", "robusto", "sinergia", "ecossistema".
+Sem emoji. Nunca inventar dados — use [DADO AUSENTE: descrição] se faltar informação.
 
-Estrutura HTML por tipo:
-- EVENTO FUTURO: <p>LEAD</p> <p>contexto</p> <p>detalhes</p> <h2>Serviço</h2> <ul>O quê/Quando/Onde/Entrada/Mais info</ul>
-- NOTÍCIA/ANÚNCIO: <p>LEAD</p> <p>contexto</p> <p>detalhes</p>
-- RETROSPECTIVA: <p>LEAD</p> <p>como foi</p> <p>reações</p>
+QUANTIDADE MÍNIMA DE CONTEÚDO:
+O post deve ter ao menos 250 palavras de conteúdo (excluindo o bloco Serviço).
+Use todos os dados do release — cada atração, artista, data e detalhe merece ser mencionado.
+Não sintetize demais: prefira 4 parágrafos ricos a 2 parágrafos rasos.
+
+ESTRUTURA HTML POR TIPO:
+
+[EVENTO FUTURO] — show, feira, festival, palestra, curso, exposição:
+<p><strong>LEAD:</strong> 1–2 frases respondendo: o quê, quando, onde, quem.</p>
+<p>Contexto: por que este evento importa para o leitor? O que ele vai encontrar? Citação do organizador se houver (com atribuição).</p>
+<p>Detalhes: programação, atrações, destaques. Mencione cada atração listada no release.</p>
+<p>Informações adicionais: como se inscrever, o que levar, etc. (se houver no release).</p>
+<h2>Serviço</h2>
+<ul>
+  <li><strong>O quê:</strong> [nome completo do evento]</li>
+  <li><strong>Quando:</strong> [data e horário]</li>
+  <li><strong>Onde:</strong> [endereço completo]</li>
+  <li><strong>Entrada:</strong> [gratuita / valor / como obter ingresso]</li>
+  <li><strong>Mais informações:</strong> [telefone / site / redes sociais]</li>
+</ul>
+
+[NOTÍCIA/ANÚNCIO] — novidade institucional, resultado, conquista:
+<p><strong>LEAD:</strong> O fato principal em 1–2 frases. Quem fez o quê.</p>
+<p>Contexto: por que isso importa para o morador? Qual problema resolve ou qual avanço representa?</p>
+<p>Detalhes: números, prazos, etapas, declarações. Use os dados do release sem cortar.</p>
+<p>Desdobramentos ou próximos passos, se houver.</p>
+
+[RETROSPECTIVA] — balanço, resultado, evento já realizado:
+<p><strong>LEAD:</strong> O resultado principal em 1–2 frases.</p>
+<p>Como foi: dados, números, destaques, público presente.</p>
+<p>Reações e declarações: citações de organizadores, participantes, autoridades (com atribuição).</p>
+<p>Próxima edição ou desdobramentos, se houver.</p>
 
 SEO:
 - Título: máx 65 chars, deve ter nome da cidade + tema principal
+  Exemplos: "Festival de Jazz chega a Americana em abril", "Curso gratuito de teatro abre inscrições em SBO"
 - Slug: lowercase, hífens, sem acentos, sem stop words
+- Keyword principal deve aparecer no primeiro parágrafo
 
-Categorias WordPress:
-- Música: 23 | Arte: 22 | Audiovisual: 533 | Literatura: 540 | Educação: 384
-- Diversão: 11 | Cultura: 13 | Rolês: 19 | Comida: 10 | Eventos: 12
+CATEGORIAS WordPress (use o ID exato, apenas estes são válidos):
+- Show, concerto, festival de música → Música: 23
+- Teatro, dança, circo, performance → Arte: 22
+- Cinema, série, documentário → Audiovisual: 533
+- Livro, leitura, autor, literatura → Literatura: 540
+- Curso gratuito, oficina, palestra, workshop → Educação: 384
+- Festa, carnaval, bloco → Diversão: 11 (ou Carnaval: 561 se for carnaval)
+- Exposição, museu, galeria → Cultura: 13
+- O que fazer / evento misto → Rolês: 19
+- Gastronomia, restaurante, feira de comida → Comida: 10
+- Evento geral sem categoria específica → Eventos: 12
+Prefira a mais específica. "Círculo do Livro" → Literatura (540), não Eventos (12).
+
+TAGS: gere 5–8 tags em lowercase separadas, relevantes para SEO.
+Inclua: nome da cidade, tema principal, nome do evento ou local se relevante.
+Exemplos: ["americana", "musica", "show gratuito", "teatro municipal", "cultura"]
 
 Retorne APENAS um objeto JSON (sem markdown):
 {
@@ -126,6 +189,7 @@ Retorne APENAS um objeto JSON (sem markdown):
   "slug": "...",
   "wp_category_id": 12,
   "html": "<p>...</p>",
+  "tags": ["tag1", "tag2", "tag3"],
   "credito_imagem": "Foto: Nome via Fonte ou vazio",
   "dados_ausentes": []
 }"""
@@ -135,7 +199,7 @@ Remetente: {email.get('sender', '')}
 Data: {email.get('date', '')}
 
 Corpo do release:
-{email.get('body_text', '') or email.get('body_html', '')[:5000]}"""
+{email.get('body_text', '') or email.get('body_html', '')[:8000]}"""
 
     try:
         return llm_call_json(system=system, user=user)
@@ -213,6 +277,11 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     sender = email.get("sender", "")
     date = email.get("date", "")
 
+    # Deduplicação: pula emails já processados em runs anteriores
+    if not dry_run and email_id in _load_processed():
+        print(f"\n[run_releases] → Já processado, pulando: {subject[:60]}", file=sys.stderr)
+        return {"email_id": email_id, "relevante": False, "motivo": "Já processado anteriormente"}
+
     print(f"\n[run_releases] → Processando: {subject[:60]}", file=sys.stderr)
 
     # 1. Avalia relevância
@@ -247,6 +316,10 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     slug = post.get("slug", "post-sem-slug")
     html = post.get("html", "")
     wp_category_id = post.get("wp_category_id", 12)
+    if wp_category_id not in VALID_CATEGORY_IDS:
+        print(f"[run_releases]   Categoria inválida ({wp_category_id}), usando Eventos (12).", file=sys.stderr)
+        wp_category_id = 12
+    tags = post.get("tags", [])
     credito_imagem = post.get("credito_imagem", "")
 
     print(f"[run_releases]   Título: {titulo}", file=sys.stderr)
@@ -286,11 +359,16 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     ]
     if cover_path:
         wp_args += ["--image-path", cover_path]
+    if tags:
+        wp_args += ["--tags", ",".join(tags)]
 
     wp_result = _run_json(wp_args)
     if not wp_result:
         print(f"[run_releases]   Erro ao criar rascunho no WP.", file=sys.stderr)
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "error": "wp_publish falhou"}
+
+    # Marca email como processado para evitar duplicação em runs futuros
+    _mark_processed(email_id)
 
     post_id = wp_result.get("post_id")
     edit_url = wp_result.get("edit_url", "")

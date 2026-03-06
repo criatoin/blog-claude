@@ -90,7 +90,37 @@ def upload_image(image_path: str, title: str = "") -> dict:
     return {"media_id": data["id"], "url": data.get("source_url", "")}
 
 
-def create_post(title: str, html: str, image_path: str = "", category_id: int = 0) -> dict:
+def _get_or_create_tags(tag_names: list[str], wp_url: str, auth: tuple) -> list[int]:
+    """Busca ou cria tags por nome. Retorna lista de IDs."""
+    tag_ids = []
+    for name in tag_names:
+        name = name.strip()
+        if not name:
+            continue
+        # Busca tag existente
+        resp = requests.get(
+            f"{wp_url}/wp-json/wp/v2/tags",
+            params={"search": name, "per_page": 5},
+            auth=auth,
+        )
+        if resp.ok:
+            matches = [t for t in resp.json() if t.get("name", "").lower() == name.lower()]
+            if matches:
+                tag_ids.append(matches[0]["id"])
+                continue
+        # Cria nova tag
+        resp = requests.post(
+            f"{wp_url}/wp-json/wp/v2/tags",
+            json={"name": name},
+            auth=auth,
+        )
+        if resp.ok:
+            tag_ids.append(resp.json()["id"])
+    return tag_ids
+
+
+def create_post(title: str, html: str, image_path: str = "", category_id: int = 0,
+                tag_names: list[str] | None = None) -> dict:
     """Cria um rascunho no WordPress. Retorna dict com post_id, status, url, edit_url."""
     wp_url, auth = get_config()
 
@@ -108,6 +138,10 @@ def create_post(title: str, html: str, image_path: str = "", category_id: int = 
         payload["featured_media"] = media_id
     if category_id:
         payload["categories"] = [category_id]
+    if tag_names:
+        tag_ids = _get_or_create_tags(tag_names, wp_url, auth)
+        if tag_ids:
+            payload["tags"] = tag_ids
 
     resp = requests.post(f"{wp_url}/wp-json/wp/v2/posts", json=payload, auth=auth)
     data = _check_response(resp)
@@ -164,6 +198,7 @@ def main() -> None:
     p_create.add_argument("--html", required=True)
     p_create.add_argument("--image-path", default="")
     p_create.add_argument("--category-id", type=int, default=0)
+    p_create.add_argument("--tags", default="", help="Tags separadas por vírgula")
 
     # publish
     p_publish = subparsers.add_parser("publish", help="Publica um post")
@@ -181,7 +216,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "create":
-        result = create_post(args.title, args.html, args.image_path, args.category_id)
+        tag_names = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
+        result = create_post(args.title, args.html, args.image_path, args.category_id, tag_names)
     elif args.command == "publish":
         result = publish_post(args.post_id)
     elif args.command == "trash":

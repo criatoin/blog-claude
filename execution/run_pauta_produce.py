@@ -32,6 +32,7 @@ SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
 IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")
 OUTPUT_DIR = str(PROJECT_DIR / ".tmp")
+VALID_CATEGORY_IDS = {10, 11, 12, 13, 19, 22, 23, 384, 533, 540, 561}
 
 
 def _run(args: list[str], capture: bool = True) -> subprocess.CompletedProcess:
@@ -98,12 +99,17 @@ Categorias WordPress:
 - Música: 23 | Arte: 22 | Audiovisual: 533 | Literatura: 540 | Educação: 384
 - Diversão: 11 | Cultura: 13 | Rolês: 19 | Comida: 10 | Eventos: 12
 
+TAGS: gere 5–8 tags em lowercase relevantes para SEO.
+Inclua: nome da cidade, tema principal, nome do evento ou local se relevante.
+Exemplos: ["americana", "cultura", "show gratuito"]
+
 Retorne APENAS um objeto JSON (sem markdown):
 {
   "titulo": "...",
   "slug": "...",
   "wp_category_id": 19,
   "html": "<p>...</p><p><em>Fontes: ...</em></p>",
+  "tags": ["tag1", "tag2", "tag3"],
   "dados_ausentes": []
 }"""
 
@@ -216,6 +222,10 @@ def main() -> None:
     slug = post.get("slug", titulo_sugerido.lower().replace(" ", "-")[:50])
     html = post.get("html", "")
     wp_category_id = post.get("wp_category_id", pauta.get("wp_category_id", 12))
+    if wp_category_id not in VALID_CATEGORY_IDS:
+        print(f"[run_pauta_produce] Categoria inválida ({wp_category_id}), usando Eventos (12).", file=sys.stderr)
+        wp_category_id = 12
+    tags = post.get("tags", [])
 
     print(f"[run_pauta_produce] Título: {titulo}", file=sys.stderr)
 
@@ -255,6 +265,8 @@ def main() -> None:
     ]
     if cover_path:
         wp_args += ["--image-path", cover_path]
+    if tags:
+        wp_args += ["--tags", ",".join(tags)]
 
     wp_result = _run_json(wp_args)
     if not wp_result:

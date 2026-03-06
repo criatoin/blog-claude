@@ -174,6 +174,27 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
         }
         _save_pending(pending)
         print(f"Card enviado. message_id={msg_id}", file=sys.stderr)
+
+        # Envia a imagem IG como segunda mensagem para visualização
+        ig_path = Path(ig_image_path)
+        if ig_image_path and ig_path.exists():
+            caption_preview = (ig_caption[:1000] + "…") if len(ig_caption) > 1000 else ig_caption
+            ig_caption_text = f"📸 *Arte Instagram — Post \\#{post_id}*\n\n{_escape(caption_preview)}"
+            try:
+                with ig_path.open("rb") as f:
+                    _api(
+                        "sendPhoto",
+                        data={
+                            "chat_id": _chat_id(),
+                            "caption": ig_caption_text,
+                            "parse_mode": "MarkdownV2",
+                        },
+                        files={"photo": f},
+                    )
+                print(f"Imagem IG enviada ao Telegram.", file=sys.stderr)
+            except Exception as e:
+                print(f"Aviso: falha ao enviar imagem IG ao Telegram: {e}", file=sys.stderr)
+
         return {"ok": True, "message_id": msg_id}
     else:
         return {"ok": False, "error": result}

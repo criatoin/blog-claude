@@ -171,9 +171,19 @@ Retorne um objeto JSON com os campos:
   "slug": "festival-jazz-americana-abril",
   "wp_category_id": 23,
   "html": "<p>...</p><h2>Serviço</h2><ul>...</ul>",
+  "tags": ["americana", "jazz", "musica", "festival"],
   "dados_ausentes": [],
   "credito_imagem": ""
 }
 ```
 
 Se `relevante` for `false`, preencha `motivo_descarte` e retorne os demais campos vazios.
+
+---
+
+## Notas operacionais (aprendizados do sistema)
+
+- **Deduplicação:** IDs de emails processados ficam em `.tmp/processed_emails.json` (máx 500). Emails já processados são ignorados automaticamente em runs subsequentes.
+- **Categoria inválida:** Se o LLM retornar um `wp_category_id` fora da lista acima, o sistema faz fallback automático para Eventos (12).
+- **Tags:** O pipeline cria tags no WordPress automaticamente se não existirem.
+- **Imagem IG:** Após o card de aprovação, a arte do Instagram é enviada como segunda foto no Telegram para visualização.
