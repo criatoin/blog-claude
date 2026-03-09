@@ -248,9 +248,9 @@ def cmd_send_pauta_list(pautas: list[dict]) -> dict:
         lines.append(f"{num}\\. {_escape(titulo)}")
     text = "\n".join(lines)
 
-    # Monta teclado inline em fileiras de 5
+    # Monta teclado inline em fileiras de 5 — só o número (título já está na mensagem)
     buttons = [
-        {"text": f"Produzir {p.get('numero', i+1)}", "callback_data": f"produce:{p['pauta_id']}"}
+        {"text": str(p.get('numero', i+1)), "callback_data": f"produce:{p['pauta_id']}"}
         for i, p in enumerate(pautas)
     ]
     rows = [buttons[i:i+5] for i in range(0, len(buttons), 5)]
