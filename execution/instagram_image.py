@@ -59,7 +59,7 @@ def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
 
 
 def _generate_with_gemini(cover_path: str, model_path: str, title: str, slug: str, output_dir: str) -> str:
-    """Usa Gemini para gerar arte IG com base na capa e no modelo de referência."""
+    """Usa Gemini para gerar arte IG a partir da imagem de capa."""
     api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY não configurado")
@@ -71,27 +71,24 @@ def _generate_with_gemini(cover_path: str, model_path: str, title: str, slug: st
         raise RuntimeError("google-genai não instalado")
 
     client = genai.Client(api_key=api_key)
-    model_name = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image")
+    model_name = os.getenv("GEMINI_IMAGE_MODEL", "gemini-2.0-flash-preview-image-generation")
 
-    # Carrega imagens como PIL para enviar ao Gemini
+    # Envia só a imagem de capa — não mistura com o template
     cover_img = Image.open(cover_path).convert("RGB")
-    model_img = Image.open(model_path).convert("RGB")
 
     prompt = (
-        f"Create an Instagram post image (portrait 4:5 ratio) for a cultural portal called '+blog'. "
-        f"Use the reference template image as style guide (layout, colors, typography style). "
-        f"Use the cover photo as the main visual element. "
+        f"Transform this image into a vertical Instagram post (4:5 portrait ratio) for '+blog', "
+        f"a Brazilian cultural portal covering events in Americana and region (SP). "
         f"The post is about: '{title}'. "
-        f"Keep the visual identity of the reference template. "
-        f"No text overlays needed — focus on a clean, editorial look."
+        f"Style: editorial, clean, vibrant. Keep the main subject centered. "
+        f"No text overlays. Output a single polished image ready for Instagram."
     )
 
     response = client.models.generate_content(
         model=model_name,
-        contents=[prompt, cover_img, model_img],
+        contents=[prompt, cover_img],
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
-            image_config=types.ImageConfig(aspect_ratio="4:5"),
         ),
     )
 
@@ -111,43 +108,33 @@ def _generate_with_gemini(cover_path: str, model_path: str, title: str, slug: st
     return str(raw_path)
 
 
-def _fallback_composite(cover_path: str, model_path: str, slug: str, output_dir: str) -> str:
+def _fallback_portrait_crop(cover_path: str, slug: str, output_dir: str) -> str:
     """
     Fallback quando Gemini não está disponível:
-    Faz um composite simples — modelo de referência no topo, capa na parte inferior.
+    Faz um crop inteligente da capa para formato portrait 4:5.
+    Sem misturar com template — resultado limpo.
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    model_img = Image.open(model_path).convert("RGB")
     cover_img = Image.open(cover_path).convert("RGB")
-
-    # Modelo ocupa 60% do topo, capa os 40% de baixo
-    top_h = int(IG_H * 0.60)
-    bot_h = IG_H - top_h
-
-    top = _smart_crop(model_img, IG_W, top_h)
-    bot = _smart_crop(cover_img, IG_W, bot_h)
-
-    canvas = Image.new("RGB", (IG_W, IG_H))
-    canvas.paste(top, (0, 0))
-    canvas.paste(bot, (0, top_h))
+    cropped = _smart_crop(cover_img, IG_W, IG_H)
 
     raw_path = out_dir / f"{slug}_ig_raw.jpg"
-    canvas.save(str(raw_path), format="JPEG", quality=90)
+    cropped.save(str(raw_path), format="JPEG", quality=90)
     return str(raw_path)
 
 
 def generate_ig_image(cover_path: str, model_path: str, title: str, slug: str, output_dir: str = ".tmp") -> dict:
     dest = Path(output_dir) / f"{slug}_ig.webp"
 
-    # Tenta Gemini, cai no composite se falhar
+    # Tenta Gemini; fallback = crop portrait da capa (sem mistura com template)
     try:
         raw_path = _generate_with_gemini(cover_path, model_path, title, slug, output_dir)
         print("Arte IG gerada via Gemini.", file=sys.stderr)
     except Exception as e:
-        print(f"Gemini falhou ({e}), usando composite de fallback.", file=sys.stderr)
-        raw_path = _fallback_composite(cover_path, model_path, slug, output_dir)
+        print(f"Gemini falhou ({e}), usando crop portrait como fallback.", file=sys.stderr)
+        raw_path = _fallback_portrait_crop(cover_path, slug, output_dir)
 
     # Processa para o formato final
     with Image.open(raw_path) as img:
