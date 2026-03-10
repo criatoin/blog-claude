@@ -41,6 +41,11 @@ IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")
 OUTPUT_DIR = str(PROJECT_DIR / ".tmp")
 PROCESSED_FILE = PROJECT_DIR / ".tmp" / "processed_emails.json"
 VALID_CATEGORY_IDS = {10, 11, 12, 13, 19, 22, 23, 384, 533, 540, 561}
+CATEGORY_NAMES = {
+    23: "Música", 22: "Arte", 533: "Audiovisual", 540: "Literatura",
+    384: "Educação", 11: "Diversão", 561: "Carnaval", 13: "Cultura",
+    19: "Rolês", 10: "Comida", 12: "Eventos",
+}
 
 
 def _load_processed() -> set:
@@ -396,17 +401,29 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
 
     # 4. Arte Instagram
     ig_path = ""
+    ig_url = ""
     if cover_path and Path(cover_path).exists():
+        category_name = CATEGORY_NAMES.get(wp_category_id, "Eventos")
         ig_result = _run_json([
             str(SCRIPT_DIR / "instagram_image.py"),
             "--cover", cover_path,
-            "--model", IG_MODEL,
             "--slug", slug,
             "--title", titulo,
+            "--category", category_name,
             "--output-dir", OUTPUT_DIR,
         ])
         if ig_result:
             ig_path = ig_result.get("path", "")
+
+    # Upload da arte IG para WP Media Library
+    if ig_path and Path(ig_path).exists():
+        upload_result = _run_json([
+            str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
+            "--image-path", ig_path,
+            "--title", f"{titulo} — Instagram",
+        ])
+        if upload_result:
+            ig_url = upload_result.get("url", "")
 
     # 5. Legenda Instagram
     legenda = _llm_legenda_ig(titulo, html)
@@ -448,7 +465,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     ])
     sheets_row_id = sheets_log.get("row_id", "0") if sheets_log else "0"
 
-    if ig_path:
+    if ig_url:
         _run_json([
             str(SCRIPT_DIR / "sheets_write.py"), "legenda-ig",
             "--data", json.dumps({
@@ -457,7 +474,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
                 "legenda": legenda,
                 "hashtags": "",
                 "status": "Pronta",
-                "path_imagem": ig_path,
+                "path_imagem": ig_url,
             }, ensure_ascii=False),
         ])
 
