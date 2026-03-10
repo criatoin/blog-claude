@@ -33,6 +33,11 @@ PROJECT_DIR = SCRIPT_DIR.parent
 IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")
 OUTPUT_DIR = str(PROJECT_DIR / ".tmp")
 VALID_CATEGORY_IDS = {10, 11, 12, 13, 19, 22, 23, 384, 533, 540, 561}
+CATEGORY_NAMES = {
+    23: "Música", 22: "Arte", 533: "Audiovisual", 540: "Literatura",
+    384: "Educação", 11: "Diversão", 561: "Carnaval", 13: "Cultura",
+    19: "Rolês", 10: "Comida", 12: "Eventos",
+}
 
 
 def _run(args: list[str], capture: bool = True) -> subprocess.CompletedProcess:
@@ -285,17 +290,29 @@ def main() -> None:
 
     # 6. Arte Instagram
     ig_path = ""
+    ig_url = ""
     if cover_path and Path(cover_path).exists():
+        category_name = CATEGORY_NAMES.get(wp_category_id, "Eventos")
         ig_result = _run_json([
             str(SCRIPT_DIR / "instagram_image.py"),
             "--cover", cover_path,
-            "--model", IG_MODEL,
             "--slug", slug,
             "--title", titulo,
+            "--category", category_name,
             "--output-dir", OUTPUT_DIR,
         ])
         if ig_result:
             ig_path = ig_result.get("path", "")
+
+    # Upload da arte IG para WP Media Library
+    if ig_path and Path(ig_path).exists():
+        upload_result = _run_json([
+            str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
+            "--image-path", ig_path,
+            "--title", f"{titulo} — Instagram",
+        ])
+        if upload_result:
+            ig_url = upload_result.get("url", "")
 
     # 7. Legenda Instagram
     legenda = _llm_legenda_ig(titulo, html)
@@ -322,7 +339,7 @@ def main() -> None:
     edit_url = wp_result.get("edit_url", "")
 
     # 9. Salva legenda IG no Sheets
-    if ig_path:
+    if ig_url:
         _run_json([
             str(SCRIPT_DIR / "sheets_write.py"), "legenda-ig",
             "--data", json.dumps({
@@ -331,7 +348,7 @@ def main() -> None:
                 "legenda": legenda,
                 "hashtags": "",
                 "status": "Pronta",
-                "path_imagem": ig_path,
+                "path_imagem": ig_url,
             }, ensure_ascii=False),
         ])
 
