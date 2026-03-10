@@ -82,13 +82,22 @@ Misture: tema + cidade + região + portal.
 python execution/instagram_image.py \
   --cover ".tmp/{slug}_cover.webp" \
   --slug "{slug}" \
-  --title "{titulo}"
+  --title "{titulo}" \
+  --category "{nome_da_categoria}"
 ```
 
-O script usa:
+O script usa composição local via Pillow (sem API externa):
 1. Imagem de referência dos modelos em `assets/instagram/` (8.jpg ou 6.jpg)
 2. A capa do post como base visual
-3. Gemini para gerar a composição final no estilo +blog
+3. Sobreposição de título e elementos gráficos gerada diretamente pelo script
+
+Após gerar a arte, fazer upload para WP Media Library para obter URL pública:
+```bash
+python execution/wp_publish.py upload-image \
+  --image-path ".tmp/{slug}_ig.webp" \
+  --title "{titulo} — Instagram"
+```
+A URL retornada (`url`) é salva na coluna path_imagem da aba Legendas IG.
 
 Se o script falhar, use a imagem da capa como arte de Instagram mesmo.
 
