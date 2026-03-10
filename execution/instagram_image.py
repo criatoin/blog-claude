@@ -173,13 +173,25 @@ def generate_ig_image(
     # 2. Gradiente rosa
     img = _draw_gradient(img)
 
-    # 3. Badge + título
+    # 3. Badge + título ancorados na base (margin bottom 30px)
     draw = ImageDraw.Draw(img)
     badge_x = MARGIN
-    badge_y = int(IG_H * 0.62)
-    badge_bottom = _draw_badge(draw, category, badge_x, badge_y)
-    title_y = badge_bottom + 18
-    _draw_title(draw, title, badge_x, title_y, IG_W - MARGIN * 2)
+
+    # Pré-calcula linhas e alturas para ancorar o bloco pela base
+    title_font = _load_font(TITLE_FONT_SIZE)
+    badge_font = _load_font(BADGE_FONT_SIZE)
+    wrapped_lines = _wrap_text(title, title_font, IG_W - MARGIN * 2 - LOGO_SIZE - 10)
+    line_height = TITLE_FONT_SIZE + 10
+    title_block_h = len(wrapped_lines) * line_height
+    badge_sample = badge_font.getbbox("A")
+    badge_h = (badge_sample[3] - badge_sample[1]) + 14 * 2
+
+    title_y = IG_H - 30 - title_block_h
+    badge_y = title_y - 18 - badge_h
+    _draw_badge(draw, category, badge_x, badge_y)
+    for line in wrapped_lines:
+        draw.text((badge_x, title_y), line, fill=TITLE_COLOR, font=title_font)
+        title_y += line_height
 
     # 4. Logo circular
     img = _paste_logo(img)
