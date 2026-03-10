@@ -3,12 +3,12 @@ instagram_image.py — Gera arte para Instagram via composição Pillow.
 
 Formato: 1080×1350px (4:5), WebP, <1MB
 
-Camadas:
+Camadas (de baixo para cima):
   1. Foto de capa — smart crop
   2. Gradiente rosa — overlay nos 45% inferiores (transparente → #FF3EB5 ~80%)
-  3. Badge categoria — retângulo arredondado #C8E600, texto preto bold caps
-  4. Título — texto branco bold, máx 3 linhas
-  5. Logo — círculo +blog com máscara circular (remove fundo branco)
+  3. Logo flat centralizado na base
+  4. Título — texto branco bold, máx 3 linhas (fonte ajusta automaticamente)
+  5. Badge categoria — retângulo arredondado #C8E600, texto preto bold caps
 
 Uso:
     python execution/instagram_image.py \
@@ -35,17 +35,23 @@ QUALITY_STEPS = [85, 75, 65, 55]
 
 PROJECT_DIR = Path(__file__).parent.parent
 FONT_PATH = str(PROJECT_DIR / "assets" / "fonts" / "Poppins-Bold.ttf")
-LOGO_PATH = str(PROJECT_DIR / "Logo redondo +blog fundo rosa.png")
+LOGO_FLAT_PATH = str(PROJECT_DIR / "logos" / "Logo +blog roxo.png.png")
 
 BADGE_COLOR = "#C8E600"
 BADGE_TEXT_COLOR = "#1A1A1A"
-GRADIENT_COLOR = (255, 62, 181)   # #FF3EB5 — rosa da marca
+GRADIENT_COLOR = (255, 62, 181)  # #FF3EB5 — rosa da marca
 TITLE_COLOR = "white"
 
 BADGE_FONT_SIZE = 30
-TITLE_FONT_SIZE = 54
-LOGO_SIZE = 110
+TITLE_FONT_SIZE_MAX = 52
+TITLE_FONT_SIZE_MIN = 28
 MARGIN = 44
+
+# Espaçamentos verticais (de baixo para cima)
+BOTTOM_MARGIN = 60       # margem inferior da canvas
+LOGO_HEIGHT = 75         # altura do logo flat
+LOGO_GAP = 24            # gap entre logo e título
+BADGE_TITLE_GAP = 16     # gap entre badge e título
 
 
 def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
@@ -87,6 +93,49 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
+def _remove_white_bg(img: Image.Image) -> Image.Image:
+    """Converte fundo branco/quase-branco em transparente."""
+    img = img.convert("RGBA")
+    data = img.getdata()
+    new_data = [
+        (r, g, b, 0) if r > 230 and g > 230 and b > 230 else (r, g, b, a)
+        for r, g, b, a in data
+    ]
+    img.putdata(new_data)
+    return img
+
+
+def _paste_logo_centered(img: Image.Image) -> tuple[Image.Image, int]:
+    """
+    Cola logo flat centralizado horizontalmente acima da margem inferior.
+    Recorta o espaço em branco do PNG antes de redimensionar para que
+    LOGO_HEIGHT corresponda à altura real do conteúdo do logo.
+    Retorna (imagem, y_topo_do_logo) para calcular posição do texto acima.
+    """
+    logo_top_y = IG_H - BOTTOM_MARGIN - LOGO_HEIGHT
+    try:
+        logo = Image.open(LOGO_FLAT_PATH).convert("RGBA")
+    except Exception:
+        return img, logo_top_y
+
+    logo = _remove_white_bg(logo)
+
+    # Recorta o espaço vazio ao redor do conteúdo real do logo
+    bbox = logo.getbbox()
+    if bbox:
+        logo = logo.crop(bbox)
+
+    # Redimensiona pela altura mantendo proporção
+    orig_w, orig_h = logo.size
+    new_w = int(orig_w * LOGO_HEIGHT / orig_h)
+    logo = logo.resize((new_w, LOGO_HEIGHT), Image.LANCZOS)
+
+    x = (IG_W - new_w) // 2
+    base = img.convert("RGBA")
+    base.paste(logo, (x, logo_top_y), mask=logo)
+    return base.convert("RGB"), logo_top_y
+
+
 def _draw_badge(draw: ImageDraw.Draw, category: str, x: int, y: int) -> int:
     """Desenha badge e retorna y da borda inferior."""
     font = _load_font(BADGE_FONT_SIZE)
@@ -119,33 +168,19 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[
             current.append(word)
     if current:
         lines.append(" ".join(current))
-    return lines[:3]
+    return lines
 
 
-def _draw_title(draw: ImageDraw.Draw, title: str, x: int, y: int, max_width: int) -> None:
-    font = _load_font(TITLE_FONT_SIZE)
-    lines = _wrap_text(title, font, max_width)
-    line_height = TITLE_FONT_SIZE + 10
-    for line in lines:
-        draw.text((x, y), line, fill=TITLE_COLOR, font=font)
-        y += line_height
-
-
-def _paste_logo(img: Image.Image) -> Image.Image:
-    """Cola logo circular no canto inferior direito com máscara."""
-    try:
-        logo = Image.open(LOGO_PATH).convert("RGBA")
-    except Exception:
-        return img
-    logo = logo.resize((LOGO_SIZE, LOGO_SIZE), Image.LANCZOS)
-    mask = Image.new("L", (LOGO_SIZE, LOGO_SIZE), 0)
-    ImageDraw.Draw(mask).ellipse([(0, 0), (LOGO_SIZE, LOGO_SIZE)], fill=255)
-    logo.putalpha(mask)
-    x = img.width - LOGO_SIZE - MARGIN
-    y = img.height - LOGO_SIZE - MARGIN
-    img = img.convert("RGBA")
-    img.paste(logo, (x, y), mask=logo)
-    return img.convert("RGB")
+def _fit_title_font(text: str, max_width: int) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """Retorna a maior fonte que faz o título caber em até 3 linhas."""
+    for size in range(TITLE_FONT_SIZE_MAX, TITLE_FONT_SIZE_MIN - 1, -2):
+        font = _load_font(size)
+        lines = _wrap_text(text, font, max_width)
+        if len(lines) <= 3:
+            return font, lines
+    font = _load_font(TITLE_FONT_SIZE_MIN)
+    lines = _wrap_text(text, font, max_width)
+    return font, lines[:3]
 
 
 def _compress_webp(img: Image.Image, dest: Path) -> None:
@@ -173,28 +208,26 @@ def generate_ig_image(
     # 2. Gradiente rosa
     img = _draw_gradient(img)
 
-    # 3. Badge + título ancorados na base (margin bottom 30px)
-    draw = ImageDraw.Draw(img)
-    badge_x = MARGIN
+    # 3. Logo flat centralizado na base
+    img, logo_top_y = _paste_logo_centered(img)
 
-    # Pré-calcula linhas e alturas para ancorar o bloco pela base
-    title_font = _load_font(TITLE_FONT_SIZE)
+    # 4. Badge + título ancorados acima do logo
     badge_font = _load_font(BADGE_FONT_SIZE)
-    wrapped_lines = _wrap_text(title, title_font, IG_W - MARGIN * 2 - LOGO_SIZE - 10)
-    line_height = TITLE_FONT_SIZE + 10
+    title_font, wrapped_lines = _fit_title_font(title, IG_W - MARGIN * 2)
+    line_height = title_font.size + 10
     title_block_h = len(wrapped_lines) * line_height
     badge_sample = badge_font.getbbox("A")
     badge_h = (badge_sample[3] - badge_sample[1]) + 14 * 2
 
-    title_y = IG_H - 30 - title_block_h
-    badge_y = title_y - 18 - badge_h
-    _draw_badge(draw, category, badge_x, badge_y)
-    for line in wrapped_lines:
-        draw.text((badge_x, title_y), line, fill=TITLE_COLOR, font=title_font)
-        title_y += line_height
+    title_y = logo_top_y - LOGO_GAP - title_block_h
+    badge_y = title_y - BADGE_TITLE_GAP - badge_h
 
-    # 4. Logo circular
-    img = _paste_logo(img)
+    draw = ImageDraw.Draw(img)
+    _draw_badge(draw, category, MARGIN, badge_y)
+    y = title_y
+    for line in wrapped_lines:
+        draw.text((MARGIN, y), line, fill=TITLE_COLOR, font=title_font)
+        y += line_height
 
     # 5. Salva como WebP
     _compress_webp(img, dest)
@@ -212,7 +245,6 @@ def main() -> None:
     parser.add_argument("--title", required=True)
     parser.add_argument("--category", default="Eventos")
     parser.add_argument("--output-dir", default=".tmp")
-    # --model mantido por compatibilidade mas ignorado
     parser.add_argument("--model", default="", help="(ignorado — mantido para compatibilidade)")
     args = parser.parse_args()
 

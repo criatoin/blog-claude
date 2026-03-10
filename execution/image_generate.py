@@ -147,7 +147,9 @@ def _try_gemini(query: str, slug: str, output_dir: str) -> dict | None:
         prompt = (
             f"Create a high-quality landscape photograph for a news article cover. "
             f"Subject: {query}. "
-            f"Style: editorial photography, natural lighting, vibrant colors, no text overlays."
+            f"Style: editorial photography, natural lighting, vibrant colors. "
+            f"IMPORTANT: absolutely no text, no signs, no banners, no writing, no logos, "
+            f"no labels, no captions anywhere in the image. Pure photography only."
         )
 
         response = client.models.generate_content(
@@ -204,7 +206,9 @@ def _try_openai(query: str, slug: str, output_dir: str) -> dict | None:
         prompt = (
             f"Editorial photography for a news article cover. "
             f"Subject: {query}. "
-            f"High resolution, natural lighting, no text, no logos, landscape orientation."
+            f"High resolution, natural lighting, landscape orientation. "
+            f"IMPORTANT: absolutely no text, no signs, no banners, no writing, no logos, "
+            f"no labels anywhere in the image. Pure photography only."
         )
 
         # gpt-image-1 retorna b64_json por padrão (não aceita response_format)
