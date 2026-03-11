@@ -157,13 +157,19 @@ Sem emoji. Sem jargão corporativo.
 Nunca inventar dados — use [DADO AUSENTE: descrição] se faltar informação.
 
 ════════════════════════════════
-QUALIDADE DE CONTEÚDO
+QUALIDADE DE CONTEÚDO — REGRA ABSOLUTA
 ════════════════════════════════
-Use TODOS os dados do release. Cada artista, atração, data, horário, endereço, preço e detalhe deve aparecer.
-Mínimo 350 palavras de conteúdo (excluindo o bloco Serviço).
-Prefira 4–5 parágrafos ricos a 2 parágrafos rasos.
-Se o release traz citação de organizador, secretário ou autoridade → inclua no texto com atribuição entre aspas.
-O leitor deve saber exatamente o quê fazer, quando, onde e quanto vai custar.
+PROIBIDO resumir o release. Use CADA dado presente no email original:
+- Todo artista, atração, palestrante, convidado → cite pelo nome completo
+- Toda data, horário, local, endereço → transcreva completo
+- Todo valor, forma de inscrição, link, telefone → inclua
+- Toda citação de organizador, secretário, autoridade → use entre aspas com atribuição
+- Toda programação, cronograma ou lista de atividades → reproduza integralmente
+
+MÍNIMO OBRIGATÓRIO: 500 palavras de conteúdo (excluindo o bloco Serviço).
+Escreva 5–6 parágrafos ricos e densos. Jamais 2 parágrafos rasos.
+O leitor deve saber exatamente o quê, quando, onde, quanto custa e como participar.
+Se o release mencionar múltiplos eventos ou datas, detalhe CADA UM.
 
 ════════════════════════════════
 HTML PURO — PROIBIDO USAR MARKDOWN

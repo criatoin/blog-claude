@@ -97,6 +97,14 @@ Sem emoji. Nunca inventar dados — use [DADO AUSENTE: descrição] se faltar in
 Cite as fontes no final com <p><em>Fontes: <a href="url">título</a></em></p>
 
 ════════════════════════════════
+QUALIDADE DE CONTEÚDO — REGRA ABSOLUTA
+════════════════════════════════
+Use CADA dado presente nas fontes: nomes, datas, horários, locais, valores, citações, programação.
+MÍNIMO OBRIGATÓRIO: 500 palavras de conteúdo (excluindo o bloco Serviço).
+Escreva 5–6 parágrafos ricos. Jamais 2 parágrafos rasos.
+O leitor deve saber exatamente o quê, quando, onde, quanto custa e como participar.
+
+════════════════════════════════
 HTML PURO — PROIBIDO USAR MARKDOWN
 ════════════════════════════════
 O campo "html" deve conter APENAS tags HTML. NUNCA use Markdown.

@@ -37,6 +37,7 @@ def llm_call(
     user: str,
     model: str | None = None,
     temperature: float = 0.3,
+    max_tokens: int = 4096,
 ) -> str:
     """
     Chama a OpenRouter API e retorna o texto da resposta.
@@ -73,6 +74,7 @@ def llm_call(
             {"role": "user", "content": user},
         ],
         "temperature": temperature,
+        "max_tokens": max_tokens,
     }
 
     last_error: Exception | None = None
