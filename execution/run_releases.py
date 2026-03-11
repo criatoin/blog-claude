@@ -342,10 +342,11 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         return True  # em caso de erro, aceita a imagem
 
 
-def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> str | None:
+def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str]:
     """
-    Seleciona ou gera imagem de capa. Retorna caminho do cover WebP ou None.
+    Seleciona ou gera imagem de capa.
     Fluxo: 1) melhor anexo do email (se relevante) → 2) Unsplash → 3) Gemini
+    Retorna (cover_path, foto_credit). cover_path pode ser "" se falhar tudo.
     """
     attachments = email.get("attachments", [])
 
@@ -353,7 +354,6 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> str | None:
         sel_args = [str(SCRIPT_DIR / "image_select.py"), "--images"] + attachments
         sel_result = _run_json(sel_args)
         if sel_result and sel_result.get("path"):
-            # Verifica relevância antes de processar
             if titulo and not _imagem_relevante(sel_result["path"], titulo):
                 print(f"[run_releases] Pulando anexo irrelevante, buscando no Unsplash.", file=sys.stderr)
             else:
@@ -364,7 +364,8 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> str | None:
                     "--output-dir", OUTPUT_DIR,
                 ])
                 if proc_result and proc_result.get("path"):
-                    return proc_result["path"]
+                    # Crédito vem do release (extraído pelo LLM)
+                    return proc_result["path"], ""
 
     # Gera imagem via Unsplash/Gemini/OpenAI
     print(f"[run_releases] Gerando imagem para slug={slug}...", file=sys.stderr)
@@ -375,9 +376,9 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> str | None:
         "--output-dir", OUTPUT_DIR,
     ])
     if gen_result and gen_result.get("path"):
-        return gen_result["path"]
+        return gen_result["path"], gen_result.get("credit", "")
 
-    return None
+    return "", ""
 
 
 def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
@@ -445,10 +446,12 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}
 
     # 3. Pipeline de imagem
-    cover_path = _pipeline_imagem(email, slug, titulo)
+    cover_path, foto_credit_gerada = _pipeline_imagem(email, slug, titulo)
     if not cover_path:
         print(f"[run_releases]   Aviso: sem imagem de capa disponível.", file=sys.stderr)
         cover_path = ""
+    # Crédito final: prioriza o do release; fallback para crédito da imagem gerada
+    foto_credit = credito_imagem or foto_credit_gerada or "Divulgação"
 
     # 4. Arte Instagram
     ig_path = ""
@@ -480,10 +483,17 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     legenda = _llm_legenda_ig(titulo, html)
 
     # 6. Cria rascunho no WordPress
+    # Adiciona bloco de créditos ao final do HTML
+    creditos_html = (
+        f'<p><small><em>Texto: Daniela Alves (MTb 23.611), reescrito pela equipe do +blog. '
+        f'Fotos: {foto_credit}</em></small></p>'
+    )
+    html_com_creditos = html + "\n" + creditos_html
+
     wp_args = [
         str(SCRIPT_DIR / "wp_publish.py"), "create",
         "--title", titulo,
-        "--html", html,
+        "--html", html_com_creditos,
         "--category-id", str(wp_category_id),
     ]
     if cover_path:

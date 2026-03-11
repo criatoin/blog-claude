@@ -295,6 +295,7 @@ def main() -> None:
         "--output-dir", OUTPUT_DIR,
     ])
     cover_path = gen_result.get("path", "") if gen_result else ""
+    foto_credit = (gen_result.get("credit", "") if gen_result else "") or "Divulgação"
 
     # 6. Arte Instagram
     ig_path = ""
@@ -326,10 +327,16 @@ def main() -> None:
     legenda = _llm_legenda_ig(titulo, html)
 
     # 8. Cria rascunho no WordPress
+    creditos_html = (
+        f'<p><small><em>Texto: Daniela Alves (MTb 23.611), reescrito pela equipe do +blog. '
+        f'Fotos: {foto_credit}</em></small></p>'
+    )
+    html_com_creditos = html + "\n" + creditos_html
+
     wp_args = [
         str(SCRIPT_DIR / "wp_publish.py"), "create",
         "--title", titulo,
-        "--html", html,
+        "--html", html_com_creditos,
         "--category-id", str(wp_category_id),
     ]
     if cover_path:
