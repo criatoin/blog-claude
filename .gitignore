@@ -1,5 +1,6 @@
 # Secrets
 .env
+acesso hostinger.txt
 credentials.json
 token.json
 token_sheets.json

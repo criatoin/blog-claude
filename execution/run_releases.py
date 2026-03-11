@@ -28,9 +28,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Guard: roda apenas em dias úteis (seg-sex) entre 8h e 18h (horário de Brasília via TZ do container)
+# Guard: roda apenas em dias úteis (seg-sex) entre 8h e 18h (horário de Brasília explícito)
 from datetime import datetime
-_now = datetime.now()
+from zoneinfo import ZoneInfo
+_now = datetime.now(ZoneInfo("America/Sao_Paulo"))
 if _now.weekday() >= 5 or not (8 <= _now.hour < 18):
     print(f"[releases] Fora do horário operacional ({_now.strftime('%a %H:%M')}). Encerrando.")
     sys.exit(0)
@@ -294,26 +295,70 @@ Conteúdo resumido:
         return f"Confira este post incrível no +blog! Link na bio.\n\n#maisblog #americana #culturaameri"
 
 
-def _pipeline_imagem(email: dict, slug: str) -> str | None:
+def _imagem_relevante(image_path: str, titulo: str) -> bool:
+    """
+    Usa Gemini Vision para verificar se a imagem é relevante ao título do post.
+    Retorna True se relevante, False se não (→ cai para Unsplash/Gemini).
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return True  # sem chave, aceita imagem sem verificar
+
+    try:
+        from google import genai
+        from google.genai import types
+        from PIL import Image as PILImage
+
+        client = genai.Client(api_key=api_key)
+        img = PILImage.open(image_path).convert("RGB")
+
+        prompt = (
+            f"Is this image visually relevant to the following news article title? "
+            f"Title: '{titulo}'. "
+            f"Answer only 'yes' or 'no'. Consider it relevant if it shows people, places, "
+            f"objects or activities related to the title topic. "
+            f"Consider it NOT relevant if it shows: logos, banners with text, unrelated scenes, "
+            f"generic office/government images for a cultural event topic."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt, img],
+        )
+        answer = response.text.strip().lower()
+        relevant = answer.startswith("yes")
+        if not relevant:
+            print(f"[run_releases] Imagem não relevante para '{titulo[:50]}' — usando Unsplash/Gemini.", file=sys.stderr)
+        return relevant
+
+    except Exception as e:
+        print(f"[run_releases] Aviso: verificação de relevância falhou ({e}), usando imagem.", file=sys.stderr)
+        return True  # em caso de erro, aceita a imagem
+
+
+def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> str | None:
     """
     Seleciona ou gera imagem de capa. Retorna caminho do cover WebP ou None.
+    Fluxo: 1) melhor anexo do email (se relevante) → 2) Unsplash → 3) Gemini
     """
     attachments = email.get("attachments", [])
 
     if attachments:
-        # Tenta selecionar o melhor anexo
         sel_args = [str(SCRIPT_DIR / "image_select.py"), "--images"] + attachments
         sel_result = _run_json(sel_args)
         if sel_result and sel_result.get("path"):
-            # Processa para 1920x1080
-            proc_result = _run_json([
-                str(SCRIPT_DIR / "image_process.py"),
-                "--input", sel_result["path"],
-                "--slug", slug,
-                "--output-dir", OUTPUT_DIR,
-            ])
-            if proc_result and proc_result.get("path"):
-                return proc_result["path"]
+            # Verifica relevância antes de processar
+            if titulo and not _imagem_relevante(sel_result["path"], titulo):
+                print(f"[run_releases] Pulando anexo irrelevante, buscando no Unsplash.", file=sys.stderr)
+            else:
+                proc_result = _run_json([
+                    str(SCRIPT_DIR / "image_process.py"),
+                    "--input", sel_result["path"],
+                    "--slug", slug,
+                    "--output-dir", OUTPUT_DIR,
+                ])
+                if proc_result and proc_result.get("path"):
+                    return proc_result["path"]
 
     # Gera imagem via Unsplash/Gemini/OpenAI
     print(f"[run_releases] Gerando imagem para slug={slug}...", file=sys.stderr)
@@ -394,7 +439,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}
 
     # 3. Pipeline de imagem
-    cover_path = _pipeline_imagem(email, slug)
+    cover_path = _pipeline_imagem(email, slug, titulo)
     if not cover_path:
         print(f"[run_releases]   Aviso: sem imagem de capa disponível.", file=sys.stderr)
         cover_path = ""
