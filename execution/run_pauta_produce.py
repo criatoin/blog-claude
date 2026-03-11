@@ -328,7 +328,7 @@ def main() -> None:
 
     # 8. Cria rascunho no WordPress
     creditos_html = (
-        f'<p><small><em>Texto: Daniela Alves (MTb 23.611), reescrito pela equipe do +blog. '
+        f'<p><small><em>Texto: Equipe do +blog. '
         f'Fotos: {foto_credit}</em></small></p>'
     )
     html_com_creditos = html + "\n" + creditos_html

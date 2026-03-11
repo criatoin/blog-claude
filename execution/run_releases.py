@@ -257,6 +257,7 @@ Retorne APENAS um objeto JSON válido (sem markdown, sem blocos ```json):
   "html": "<p>...</p>",
   "tags": ["tag1", "tag2", "tag3"],
   "credito_imagem": "Foto: Nome via Fonte ou vazio",
+  "credito_texto": "Nome do autor ou assessoria que assina o release (ex: 'Secom / Prefeitura de Americana', 'Assessoria SESC', 'Daniela Alves (MTb 23.611)'). Se não identificado, use o nome da organização remetente.",
   "dados_ausentes": []
 }"""
 
@@ -439,6 +440,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         wp_category_id = 12
     tags = post.get("tags", [])
     credito_imagem = post.get("credito_imagem", "")
+    credito_texto = post.get("credito_texto", "") or sender.split("<")[0].strip() or "Assessoria"
 
     print(f"[run_releases]   Título: {titulo}", file=sys.stderr)
 
@@ -485,7 +487,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     # 6. Cria rascunho no WordPress
     # Adiciona bloco de créditos ao final do HTML
     creditos_html = (
-        f'<p><small><em>Texto: Daniela Alves (MTb 23.611), reescrito pela equipe do +blog. '
+        f'<p><small><em>Texto: {credito_texto}, reescrito pela equipe do +blog. '
         f'Fotos: {foto_credit}</em></small></p>'
     )
     html_com_creditos = html + "\n" + creditos_html
