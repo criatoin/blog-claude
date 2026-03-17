@@ -367,8 +367,9 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
             f"Is this a real photograph (taken with a camera) that is visually related to: '{titulo}'?\n"
             f"→ If NO: answer 'no'.\n"
             f"→ If YES: answer 'yes'.\n\n"
-            f"Remember: a logo from the organizing institution is NOT a real photograph, even if it is "
-            f"related to the article topic. Type-check always wins."
+            f"Remember: a logo is NOT a real photograph even if related to the topic. "
+            f"Event banners, signs on clothing, and text in the background of a real photo are fine — "
+            f"they are part of the scene, not digitally added."
         )
 
         response = client.models.generate_content(
