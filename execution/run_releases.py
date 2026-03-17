@@ -278,23 +278,46 @@ def _llm_legenda_ig(titulo: str, html: str) -> str:
     """Gera legenda para Instagram."""
     from llm_call import llm_call
 
-    system = """Você escreve legendas para Instagram do +blog (cultura e diversão na região de Americana/SP).
+    system = """Você é um especialista em social media com 10 anos de experiência em contas de cultura e entretenimento local.
+Cria legendas para o @maisblogoficial — portal de cultura e diversão da região de Americana/SP.
 
-Regras:
-- Máximo 2200 caracteres
-- Tom informal, direto, animado
-- Primeira linha: gancho forte (sem "Vem aí", sem "Confira")
-- 3-5 parágrafos curtos
-- Inclua call-to-action no final (ex: "Link na bio para saber mais!")
-- Termina com 10-15 hashtags relevantes separadas por espaço
-- Sem emoji excessivo (máx 3 por legenda)
+## Estrutura obrigatória (nesta ordem, sem variações)
 
-Retorne APENAS o texto da legenda, sem explicações."""
+1. **GANCHO** — 1 linha única, antes do "ver mais"
+   - Prenda o scroll com um dado concreto, data, valor, ou fato específico do post.
+   - PROIBIDO: "Vem aí", "Confira", "Sabia que", "Que tal", "Incrível", "Não perca".
+   - BOM: "Entrada gratuita, sábado, 15h." / "R$ 225 mil disponíveis para festivais culturais em Americana."
+
+2. **CORPO** — 2 parágrafos curtos (máx 2 linhas cada), separados por linha em branco
+   - Detalhes concretos: onde, quando, o quê, pra quem, quanto custa.
+   - Tom de amigo dando uma dica — nunca assessoria de imprensa.
+
+3. **CTA obrigatório** — 1 linha exata, SEMPRE convidando a ler a matéria completa no site
+   - Use uma dessas frases (escolha a mais natural): "Matéria completa no +blog — link na bio 🔗" / "Todos os detalhes no +blog — link na bio." / "Leia a matéria completa: link na bio."
+   - NUNCA use "Salva esse post" como único CTA — sempre direcione ao site.
+
+4. **HASHTAGS** — linha separada, EXATAMENTE 5, nem mais nem menos
+   - Formato: 2 do tema + 2 da cidade/região + 1 da marca (#maisblog obrigatória)
+   - Cidades: #americana #santabarbaradoeste #novaodessa #sumare #interiordeSP
+   - REGRA DURA: conte as hashtags antes de finalizar. Se tiver mais de 5, remova as excedentes.
+
+## Restrições de tamanho
+- Gancho: máx 100 caracteres
+- Total da legenda (incluindo hashtags): máx 800 caracteres
+- Se ultrapassar 800 caracteres, corte o corpo — nunca corte o CTA nem as hashtags.
+
+## Tom e estilo
+- Especialista em redes sociais que conhece a região — voz próxima, direta, sem exageros.
+- Emojis: máx 2 por legenda, apenas funcionais (📌 🔗 🎭 🎶 — não decorativos).
+- Zero adjetivos vazios: "incrível", "maravilhoso", "imperdível", "fantástico", "especial".
+- Zero frases de assessoria: "a prefeitura informa", "o evento contará com", "não perca a oportunidade".
+
+Retorne APENAS o texto final da legenda. Sem prefixos, sem explicações, sem markdown."""
 
     user = f"""Post: {titulo}
 
-Conteúdo resumido:
-{html[:1500]}"""
+Conteúdo:
+{html[:2000]}"""
 
     try:
         return llm_call(system=system, user=user)
@@ -319,28 +342,75 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         client = genai.Client(api_key=api_key)
         img = PILImage.open(image_path).convert("RGB")
 
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        img_bytes = buf.getvalue()
+
         prompt = (
-            f"Is this image visually relevant to the following news article title? "
-            f"Title: '{titulo}'. "
-            f"Answer only 'yes' or 'no'. Consider it relevant if it shows people, places, "
-            f"objects or activities related to the title topic. "
-            f"Consider it NOT relevant if it shows: logos, banners with text, unrelated scenes, "
-            f"generic office/government images for a cultural event topic."
+            f"Analyze this image in two strict sequential steps. Answer ONLY 'yes' or 'no'.\n\n"
+            f"STEP 1 — IMAGE TYPE (check this first, before anything else):\n"
+            f"Is this image a logo, wordmark, brand identity, corporate seal, typographic design, "
+            f"graphic design, illustration, flyer, poster, banner, infographic, or any image where "
+            f"text or brand elements are the PRIMARY visual content?\n"
+            f"→ If YES to any of these: answer 'no' IMMEDIATELY. Do not proceed to Step 2.\n\n"
+            f"STEP 2 — RELEVANCE (only if Step 1 passed):\n"
+            f"Is this a real photograph (taken with a camera) that is visually related to: '{titulo}'?\n"
+            f"→ If NO: answer 'no'.\n"
+            f"→ If YES: answer 'yes'.\n\n"
+            f"Remember: a logo from the organizing institution is NOT a real photograph, even if it is "
+            f"related to the article topic. Type-check always wins."
         )
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[prompt, img],
+            model="gemini-2.5-flash",
+            contents=[
+                prompt,
+                types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
+            ],
         )
         answer = response.text.strip().lower()
         relevant = answer.startswith("yes")
         if not relevant:
-            print(f"[run_releases] Imagem não relevante para '{titulo[:50]}' — usando Unsplash/Gemini.", file=sys.stderr)
+            print(f"[run_releases] Imagem rejeitada (logo/não-foto/irrelevante) para '{titulo[:50]}' — usando Unsplash/Gemini.", file=sys.stderr)
+        else:
+            print(f"[run_releases] Imagem aprovada pela vision para '{titulo[:50]}'.", file=sys.stderr)
         return relevant
 
     except Exception as e:
-        print(f"[run_releases] Aviso: verificação de relevância falhou ({e}), usando imagem.", file=sys.stderr)
-        return True  # em caso de erro, aceita a imagem
+        print(f"[run_releases] Aviso: verificação de relevância falhou ({e}), rejeitando imagem por precaução.", file=sys.stderr)
+        return False  # em caso de erro, rejeita → vai para Unsplash (mais seguro)
+
+
+def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
+    """
+    Usa LLM para gerar uma query de busca de imagem em inglês.
+    Foca na atividade/pessoas — nunca em landmarks ou infraestrutura da cidade.
+    """
+    system = (
+        "You generate short image search queries (3-6 words) in English for stock photo sites like Unsplash and Pexels. "
+        "Rules:\n"
+        "1. Focus on the ACTIVITY or PEOPLE depicted (e.g. 'women fitness class', 'jazz concert crowd', 'cooking class students').\n"
+        "2. NEVER include city names, landmarks, parks, buildings, or local infrastructure — "
+        "stock photos won't have specific Brazilian city locations.\n"
+        "3. Prefer showing REAL PEOPLE doing the activity over empty venues or abstract concepts.\n"
+        "4. If it's a fitness/sport event → show people exercising.\n"
+        "5. If it's a cultural/arts event → show the art form or audience.\n"
+        "6. If it's a food event → show the food or people eating.\n"
+        "7. If it's a lecture/talk event → show audience in auditorium or speaker.\n"
+        "Output ONLY the query string, nothing else."
+    )
+    user = f"Article title: {titulo}"
+    if resumo:
+        user += f"\nSummary: {resumo[:300]}"
+    try:
+        query = llm_call(system=system, user=user).strip().strip('"').strip("'")
+        if query:
+            print(f"[run_releases] Query imagem gerada: '{query}'", file=sys.stderr)
+            return query
+    except Exception as e:
+        print(f"[run_releases] Falha ao gerar query de imagem ({e}), usando slug.", file=sys.stderr)
+    return titulo[:60]
 
 
 def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str]:
@@ -368,12 +438,14 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str
                     # Crédito vem do release (extraído pelo LLM)
                     return proc_result["path"], ""
 
-    # Gera imagem via Unsplash/Gemini/OpenAI
-    print(f"[run_releases] Gerando imagem para slug={slug}...", file=sys.stderr)
+    # Gera imagem via Unsplash/Pexels/Gemini/OpenAI
+    img_query = _gerar_query_imagem(titulo)
+    print(f"[run_releases] Gerando imagem para slug={slug} | query='{img_query}'...", file=sys.stderr)
     gen_result = _run_json([
         str(SCRIPT_DIR / "image_generate.py"),
-        "--query", slug.replace("-", " "),
+        "--query", img_query,
         "--slug", slug,
+        "--titulo", titulo,
         "--output-dir", OUTPUT_DIR,
     ])
     if gen_result and gen_result.get("path"):

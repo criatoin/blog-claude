@@ -19,7 +19,6 @@ Uso:
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -67,6 +66,35 @@ def _update_status(pauta_id: str, status: str) -> None:
         "--row-id", pauta_id,
         "--status", status,
     ])
+
+
+def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
+    """Gera query de busca de imagem em inglês via LLM — foco na atividade/pessoas, nunca na cidade."""
+    from llm_call import llm_call
+    system = (
+        "You generate short image search queries (3-6 words) in English for stock photo sites like Unsplash and Pexels. "
+        "Rules:\n"
+        "1. Focus on the ACTIVITY or PEOPLE depicted (e.g. 'women fitness class', 'jazz concert crowd', 'cooking class students').\n"
+        "2. NEVER include city names, landmarks, parks, buildings, or local infrastructure — "
+        "stock photos won't have specific Brazilian city locations.\n"
+        "3. Prefer showing REAL PEOPLE doing the activity over empty venues or abstract concepts.\n"
+        "4. If it's a fitness/sport event → show people exercising.\n"
+        "5. If it's a cultural/arts event → show the art form or audience.\n"
+        "6. If it's a food event → show the food or people eating.\n"
+        "7. If it's a lecture/talk event → show audience in auditorium or speaker.\n"
+        "Output ONLY the query string, nothing else."
+    )
+    user = f"Article title: {titulo}"
+    if resumo:
+        user += f"\nSummary: {resumo[:300]}"
+    try:
+        query = llm_call(system=system, user=user).strip().strip('"').strip("'")
+        if query:
+            print(f"[run_pauta_produce] Query imagem: '{query}'", file=sys.stderr)
+            return query
+    except Exception as e:
+        print(f"[run_pauta_produce] Falha ao gerar query ({e}), usando título.", file=sys.stderr)
+    return titulo[:60]
 
 
 def _llm_escrever_post(pauta: dict, fontes: list[dict]) -> dict:
@@ -194,23 +222,46 @@ def _llm_legenda_ig(titulo: str, html: str) -> str:
     """Gera legenda para Instagram."""
     from llm_call import llm_call
 
-    system = """Você escreve legendas para Instagram do +blog (cultura e diversão na região de Americana/SP).
+    system = """Você é um especialista em social media com 10 anos de experiência em contas de cultura e entretenimento local.
+Cria legendas para o @maisblogoficial — portal de cultura e diversão da região de Americana/SP.
 
-Regras:
-- Máximo 2200 caracteres
-- Tom informal, direto, animado
-- Primeira linha: gancho forte (sem "Vem aí", sem "Confira")
-- 3-5 parágrafos curtos
-- Inclua call-to-action no final (ex: "Link na bio para saber mais!")
-- Termina com 10-15 hashtags relevantes
-- Sem emoji excessivo (máx 3 por legenda)
+## Estrutura obrigatória (nesta ordem, sem variações)
 
-Retorne APENAS o texto da legenda, sem explicações."""
+1. **GANCHO** — 1 linha única, antes do "ver mais"
+   - Prenda o scroll com um dado concreto, data, valor, ou fato específico do post.
+   - PROIBIDO: "Vem aí", "Confira", "Sabia que", "Que tal", "Incrível", "Não perca".
+   - BOM: "Entrada gratuita, sábado, 15h." / "Festival de jazz no Mercadão neste sábado."
+
+2. **CORPO** — 2 parágrafos curtos (máx 2 linhas cada), separados por linha em branco
+   - Detalhes concretos: onde, quando, o quê, pra quem, quanto custa.
+   - Tom de amigo dando uma dica — nunca assessoria de imprensa.
+
+3. **CTA obrigatório** — 1 linha exata, SEMPRE convidando a ler a matéria completa no site
+   - Use uma dessas frases (escolha a mais natural): "Matéria completa no +blog — link na bio 🔗" / "Todos os detalhes no +blog — link na bio." / "Leia a matéria completa: link na bio."
+   - NUNCA use "Salva esse post" como único CTA — sempre direcione ao site.
+
+4. **HASHTAGS** — linha separada, EXATAMENTE 5, nem mais nem menos
+   - Formato: 2 do tema + 2 da cidade/região + 1 da marca (#maisblog obrigatória)
+   - Cidades: #americana #santabarbaradoeste #novaodessa #sumare #interiordeSP
+   - REGRA DURA: conte as hashtags antes de finalizar. Se tiver mais de 5, remova as excedentes.
+
+## Restrições de tamanho
+- Gancho: máx 100 caracteres
+- Total da legenda (incluindo hashtags): máx 800 caracteres
+- Se ultrapassar 800 caracteres, corte o corpo — nunca corte o CTA nem as hashtags.
+
+## Tom e estilo
+- Especialista em redes sociais que conhece a região — voz próxima, direta, sem exageros.
+- Emojis: máx 2 por legenda, apenas funcionais (📌 🔗 🎭 🎶 — não decorativos).
+- Zero adjetivos vazios: "incrível", "maravilhoso", "imperdível", "fantástico", "especial".
+- Zero frases de assessoria: "a prefeitura informa", "o evento contará com", "não perca a oportunidade".
+
+Retorne APENAS o texto final da legenda. Sem prefixos, sem explicações, sem markdown."""
 
     user = f"""Post: {titulo}
 
 Conteúdo:
-{html[:1500]}"""
+{html[:2000]}"""
 
     try:
         return llm_call(system=system, user=user)
@@ -287,11 +338,13 @@ def main() -> None:
     print(f"[run_pauta_produce] Título: {titulo}", file=sys.stderr)
 
     # 5. Gera imagem de capa
-    print("[run_pauta_produce] Gerando imagem...", file=sys.stderr)
+    img_query = _gerar_query_imagem(titulo)
+    print(f"[run_pauta_produce] Gerando imagem | query='{img_query}'...", file=sys.stderr)
     gen_result = _run_json([
         str(SCRIPT_DIR / "image_generate.py"),
-        "--query", keyword or slug.replace("-", " "),
+        "--query", img_query,
         "--slug", slug,
+        "--titulo", titulo,
         "--output-dir", OUTPUT_DIR,
     ])
     cover_path = gen_result.get("path", "") if gen_result else ""

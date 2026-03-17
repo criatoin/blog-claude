@@ -3,13 +3,14 @@ image_generate.py — Gera imagem de capa quando não há anexo adequado.
 
 Sequência de tentativas:
   1. Unsplash (grátis) — requer UNSPLASH_ACCESS_KEY
-  2. Gemini image generation — requer GEMINI_API_KEY
-  3. GPT Image 1 (OpenAI) — requer OPENAI_API_KEY
+  2. Pexels (grátis) — requer PEXELS_API_KEY
+  3. Gemini image generation — requer GEMINI_API_KEY
+  4. GPT Image 1 (OpenAI) — requer OPENAI_API_KEY
 
 Após gerar, passa pela mesma pipeline do image_process.py → 1920x1080 WebP <1MB
 
 Uso:
-    python execution/image_generate.py --query "festival jazz americana sp" --slug festival-jazz [--output-dir .tmp]
+    python execution/image_generate.py --query "festival jazz americana sp" --slug festival-jazz --titulo "Festival de Jazz em Americana" [--output-dir .tmp]
 
 Saída JSON para stdout:
     {"path": ".tmp/festival-jazz_cover.webp", "source": "unsplash", "credit": "Foto: John Doe via Unsplash"}
@@ -19,7 +20,6 @@ import argparse
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import requests
@@ -44,6 +44,64 @@ def _import_openai():
         return None
 
 
+# ─── Validação via Gemini Vision ──────────────────────────────────────────────
+
+def _validate_image(image_path: str, titulo: str) -> bool:
+    """
+    Usa Gemini Vision para validar imagem antes de aceitar.
+    Rejeita se: não é foto real, não é relevante ao título, ou tem texto/banner visível.
+    Sem GEMINI_API_KEY: aceita sem validar (apenas loga aviso).
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return True  # sem chave, aceita sem validar
+
+    try:
+        from google import genai
+        from google.genai import types
+        from PIL import Image as PILImage
+        import io
+
+        client = genai.Client(api_key=api_key)
+        img = PILImage.open(image_path).convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        img_bytes = buf.getvalue()
+
+        prompt = (
+            f"Analyze this image in strict sequential steps. Answer ONLY 'yes' or 'no'.\n\n"
+            f"STEP 1 — IMAGE TYPE (check first, immediately):\n"
+            f"Is this image a logo, wordmark, brand identity, graphic design, illustration, flyer, poster, "
+            f"banner, infographic, or any image where text or brand elements are the PRIMARY visual content?\n"
+            f"→ If YES: answer 'no' IMMEDIATELY. Stop here.\n\n"
+            f"STEP 2 — TEXT CONTENT (only if Step 1 passed):\n"
+            f"Does the image contain large prominent text, title cards, or overlaid promotional writing? "
+            f"(Small background text like a distant storefront sign is OK.)\n"
+            f"→ If YES: answer 'no'. Stop here.\n\n"
+            f"STEP 3 — RELEVANCE (only if Steps 1 and 2 passed):\n"
+            f"Is this a real photograph visually related to: '{titulo}'?\n"
+            f"→ If NO: answer 'no'.\n"
+            f"→ If YES: answer 'yes'."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                prompt,
+                types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
+            ],
+        )
+        answer = response.text.strip().lower()
+        valid = answer.startswith("yes")
+        if not valid:
+            print(f"[image_generate] Imagem rejeitada pela vision (não-foto/irrelevante/texto): {image_path}", file=sys.stderr)
+        return valid
+
+    except Exception as e:
+        print(f"[image_generate] Aviso: validação vision falhou ({e}), aceitando imagem.", file=sys.stderr)
+        return True  # em erro, aceita (já é fallback)
+
+
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _process_to_cover(raw_path: str, slug: str, output_dir: str) -> str:
@@ -65,69 +123,135 @@ def _save_raw(content: bytes, slug: str, output_dir: str, ext: str = "jpg") -> s
 
 # ─── Fonte 1: Unsplash ────────────────────────────────────────────────────────
 
-def _try_unsplash(query: str, slug: str, output_dir: str) -> dict | None:
+def _try_unsplash(query: str, slug: str, output_dir: str, titulo: str = "") -> dict | None:
     api_key = os.getenv("UNSPLASH_ACCESS_KEY", "")
     if not api_key:
         print("Unsplash: UNSPLASH_ACCESS_KEY não configurado, pulando.", file=sys.stderr)
         return None
 
-    try:
-        resp = requests.get(
+    def _search(q: str) -> list:
+        r = requests.get(
             "https://api.unsplash.com/search/photos",
-            params={"query": query, "per_page": 5, "orientation": "landscape"},
+            params={"query": q, "per_page": 5, "orientation": "landscape"},
             headers={"Authorization": f"Client-ID {api_key}"},
             timeout=15,
         )
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
+        r.raise_for_status()
+        return r.json().get("results", [])
+
+    try:
+        results = _search(query)
 
         if not results:
-            # Fallback: tenta com as 3 primeiras palavras (remove nomes de cidades BR)
             short_query = " ".join(query.split()[:3])
             if short_query != query:
                 print(f"Unsplash: sem resultados para '{query}', tentando '{short_query}'", file=sys.stderr)
-                resp2 = requests.get(
-                    "https://api.unsplash.com/search/photos",
-                    params={"query": short_query, "per_page": 5, "orientation": "landscape"},
-                    headers={"Authorization": f"Client-ID {api_key}"},
-                    timeout=15,
-                )
-                resp2.raise_for_status()
-                results = resp2.json().get("results", [])
+                results = _search(short_query)
             if not results:
                 print(f"Unsplash: sem resultados para '{query}'", file=sys.stderr)
                 return None
 
-        photo = results[0]
-        download_url = photo["urls"]["regular"]  # 1080px de largura
-        photographer = photo["user"]["name"]
+        # Itera pelos candidatos e usa o primeiro que passar na validação
+        for idx, photo in enumerate(results):
+            download_url = photo["urls"]["regular"]  # 1080px de largura
+            photographer = photo["user"]["name"]
 
-        img_resp = requests.get(download_url, timeout=30)
-        img_resp.raise_for_status()
+            img_resp = requests.get(download_url, timeout=30)
+            img_resp.raise_for_status()
 
-        raw_path = _save_raw(img_resp.content, slug, output_dir)
-        cover_path = _process_to_cover(raw_path, slug, output_dir)
+            raw_path = _save_raw(img_resp.content, slug, output_dir)
 
-        # Aciona o download tracking do Unsplash (exigido pelos termos)
-        try:
-            track_url = photo["links"].get("download_location", "")
-            if track_url:
-                requests.get(track_url, headers={"Authorization": f"Client-ID {api_key}"}, timeout=5)
-        except Exception:
-            pass
+            if titulo and not _validate_image(raw_path, titulo):
+                print(f"Unsplash: candidato {idx+1}/5 rejeitado, tentando próximo.", file=sys.stderr)
+                continue
 
-        return {
-            "path": cover_path,
-            "source": "unsplash",
-            "credit": f"Foto: {photographer} via Unsplash",
-        }
+            cover_path = _process_to_cover(raw_path, slug, output_dir)
+
+            # Aciona o download tracking do Unsplash (exigido pelos termos)
+            try:
+                track_url = photo["links"].get("download_location", "")
+                if track_url:
+                    requests.get(track_url, headers={"Authorization": f"Client-ID {api_key}"}, timeout=5)
+            except Exception:
+                pass
+
+            print(f"Unsplash: candidato {idx+1}/5 aprovado.", file=sys.stderr)
+            return {
+                "path": cover_path,
+                "source": "unsplash",
+                "credit": f"Foto: {photographer} via Unsplash",
+            }
+
+        print(f"Unsplash: nenhum dos {len(results)} candidatos passou na validação.", file=sys.stderr)
+        return None
 
     except Exception as e:
         print(f"Unsplash falhou: {e}", file=sys.stderr)
         return None
 
 
-# ─── Fonte 2: Gemini image generation ────────────────────────────────────────
+# ─── Fonte 2: Pexels ─────────────────────────────────────────────────────────
+
+def _try_pexels(query: str, slug: str, output_dir: str, titulo: str = "") -> dict | None:
+    api_key = os.getenv("PEXELS_API_KEY", "")
+    if not api_key:
+        print("Pexels: PEXELS_API_KEY não configurado, pulando.", file=sys.stderr)
+        return None
+
+    def _search(q: str) -> list:
+        r = requests.get(
+            "https://api.pexels.com/v1/search",
+            params={"query": q, "per_page": 5, "orientation": "landscape"},
+            headers={"Authorization": api_key},
+            timeout=15,
+        )
+        r.raise_for_status()
+        return r.json().get("photos", [])
+
+    try:
+        photos = _search(query)
+
+        if not photos:
+            short_query = " ".join(query.split()[:3])
+            if short_query != query:
+                print(f"Pexels: sem resultados para '{query}', tentando '{short_query}'", file=sys.stderr)
+                photos = _search(short_query)
+            if not photos:
+                print(f"Pexels: sem resultados para '{query}'", file=sys.stderr)
+                return None
+
+        # Itera pelos candidatos e usa o primeiro que passar na validação
+        for idx, photo in enumerate(photos):
+            download_url = photo["src"]["large2x"]  # ~1880px de largura
+            photographer = photo.get("photographer", "")
+
+            img_resp = requests.get(download_url, timeout=30)
+            img_resp.raise_for_status()
+
+            raw_path = _save_raw(img_resp.content, slug, output_dir)
+
+            if titulo and not _validate_image(raw_path, titulo):
+                print(f"Pexels: candidato {idx+1}/5 rejeitado, tentando próximo.", file=sys.stderr)
+                continue
+
+            cover_path = _process_to_cover(raw_path, slug, output_dir)
+
+            print(f"Pexels: candidato {idx+1}/5 aprovado.", file=sys.stderr)
+            return {
+                "path": cover_path,
+                "source": "pexels",
+                "credit": f"Foto: {photographer} via Pexels" if photographer else "",
+            }
+
+        print(f"Pexels: nenhum dos {len(photos)} candidatos passou na validação.", file=sys.stderr)
+        return None
+
+    except Exception as e:
+        print(f"Pexels falhou: {e}", file=sys.stderr)
+        return None
+
+
+# ─── Fonte 3: Gemini image generation ───────────────────────────────────────
 
 def _try_gemini(query: str, slug: str, output_dir: str) -> dict | None:
     api_key = os.getenv("GEMINI_API_KEY", "")
@@ -186,7 +310,7 @@ def _try_gemini(query: str, slug: str, output_dir: str) -> dict | None:
         return None
 
 
-# ─── Fonte 3: GPT Image 1 (OpenAI) ───────────────────────────────────────────
+# ─── Fonte 4: GPT Image 1 (OpenAI) ──────────────────────────────────────────
 
 def _try_openai(query: str, slug: str, output_dir: str) -> dict | None:
     api_key = os.getenv("OPENAI_API_KEY", "")
@@ -256,9 +380,14 @@ def _try_pil_placeholder(slug: str, output_dir: str) -> dict | None:
         return None
 
 
-def generate_image(query: str, slug: str, output_dir: str = ".tmp") -> dict:
-    """Tenta Unsplash → Gemini → OpenAI → placeholder PIL. Retorna resultado da primeira que funcionar."""
-    for attempt in [_try_unsplash, _try_gemini, _try_openai]:
+def generate_image(query: str, slug: str, output_dir: str = ".tmp", titulo: str = "") -> dict:
+    """Tenta Unsplash → Pexels → Gemini → OpenAI → placeholder PIL. Retorna resultado da primeira que funcionar."""
+    for attempt in [
+        lambda q, s, o: _try_unsplash(q, s, o, titulo),
+        lambda q, s, o: _try_pexels(q, s, o, titulo),
+        _try_gemini,
+        _try_openai,
+    ]:
         result = attempt(query, slug, output_dir)
         if result:
             return result
@@ -276,10 +405,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Gera imagem de capa via Unsplash/Gemini/OpenAI")
     parser.add_argument("--query", required=True, help="Descrição do tema para busca/geração")
     parser.add_argument("--slug", required=True, help="Slug do post")
+    parser.add_argument("--titulo", default="", help="Título do artigo — usado para validação via Gemini Vision")
     parser.add_argument("--output-dir", default=".tmp", help="Diretório de saída (padrão: .tmp)")
     args = parser.parse_args()
 
-    result = generate_image(args.query, args.slug, args.output_dir)
+    result = generate_image(args.query, args.slug, args.output_dir, args.titulo)
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     sys.stdout.buffer.write(b"\n")
 
