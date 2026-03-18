@@ -27,7 +27,10 @@ import json
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
+
+load_dotenv()
 
 IG_W, IG_H = 1080, 1350
 MAX_SIZE_BYTES = 1 * 1024 * 1024
@@ -54,10 +57,82 @@ LOGO_GAP = 24            # gap entre logo e título
 BADGE_TITLE_GAP = 16     # gap entre badge e título
 
 
+def _detect_subject_position(img: Image.Image) -> tuple[str, str]:
+    """
+    Usa Gemini Vision para detectar onde estão os sujeitos principais.
+    Retorna (horizontal, vertical): horizontal ∈ {left, center, right, full}
+                                    vertical   ∈ {top, center, bottom, full}
+    Fallback: ("center", "center") em caso de erro ou sem API key.
+    """
+    import os
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return "center", "center"
+    try:
+        from google import genai
+        from google.genai import types
+        import io
+
+        client = genai.Client(api_key=api_key)
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=75)
+        img_bytes = buf.getvalue()
+
+        prompt = (
+            "Look at this image and identify the main subjects (people, key objects, or focal point).\n"
+            "Answer ONLY with two words separated by a comma:\n"
+            "  Word 1 — horizontal position: left | center | right | full\n"
+            "  Word 2 — vertical position:   top  | center | bottom | full\n"
+            "Rules:\n"
+            "- 'left' if subjects occupy mainly the left third\n"
+            "- 'right' if subjects occupy mainly the right third\n"
+            "- 'center' if subjects are in the middle third\n"
+            "- 'full' if subjects span the full width/height\n"
+            "Example answers: 'left, center'  |  'center, top'  |  'full, full'\n"
+            "Answer ONLY those two words, nothing else."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[
+                prompt,
+                types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
+            ],
+        )
+        parts = [p.strip().lower() for p in response.text.strip().split(",")]
+        h_pos = parts[0] if parts[0] in ("left", "center", "right", "full") else "center"
+        v_pos = parts[1] if len(parts) > 1 and parts[1] in ("top", "center", "bottom", "full") else "center"
+        print(f"[instagram_image] Posição dos sujeitos: h={h_pos}, v={v_pos}", file=sys.stderr)
+        return h_pos, v_pos
+    except Exception as e:
+        print(f"[instagram_image] Detecção de posição falhou ({e}), usando centro.", file=sys.stderr)
+        return "center", "center"
+
+
+def _crop_offset(total: int, crop: int, position: str, side_start: str, side_end: str) -> int:
+    """
+    Calcula o offset de crop baseado na posição do sujeito.
+    position: 'left'/'top', 'center', 'right'/'bottom', 'full'
+    """
+    slack = total - crop
+    if slack <= 0:
+        return 0
+    if position in (side_start, "full"):
+        return max(0, slack // 6)          # ancora próximo ao início, com pequena margem
+    elif position == side_end:
+        return min(slack, slack - slack // 6)  # ancora próximo ao fim
+    else:
+        return slack // 2                   # centro (comportamento original)
+
+
 def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
     src_w, src_h = img.size
     ratio = w / h
     src_ratio = src_w / src_h
+
+    # Detecta posição dos sujeitos antes de redimensionar (mais rápido com imagem menor)
+    h_pos, v_pos = _detect_subject_position(img)
+
     if src_ratio > ratio:
         new_h = h
         new_w = int(src_w * h / src_h)
@@ -65,8 +140,9 @@ def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
         new_w = w
         new_h = int(src_h * w / src_w)
     img = img.resize((new_w, new_h), Image.LANCZOS)
-    left = (new_w - w) // 2
-    top = (new_h - h) // 2
+
+    left = _crop_offset(new_w, w, h_pos, "left", "right")
+    top  = _crop_offset(new_h, h, v_pos, "top",  "bottom")
     return img.crop((left, top, left + w, top + h))
 
 
