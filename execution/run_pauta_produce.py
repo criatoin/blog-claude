@@ -88,7 +88,9 @@ def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
     if resumo:
         user += f"\nSummary: {resumo[:300]}"
     try:
-        query = llm_call(system=system, user=user).strip().strip('"').strip("'")
+        raw = llm_call(system=system, user=user)
+        # Pega apenas a primeira linha não-vazia — LLM às vezes retorna lista
+        query = next((l.strip().strip('"').strip("'") for l in raw.splitlines() if l.strip()), "")
         if query:
             print(f"[run_pauta_produce] Query imagem: '{query}'", file=sys.stderr)
             return query

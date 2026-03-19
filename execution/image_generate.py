@@ -114,8 +114,8 @@ def _validate_image(image_path: str, titulo: str) -> bool:
         return valid
 
     except Exception as e:
-        print(f"[image_generate] Aviso: validação vision falhou ({e}), aceitando imagem.", file=sys.stderr)
-        return True  # em erro, aceita (já é fallback)
+        print(f"[image_generate] Aviso: validação vision falhou ({e}), rejeitando candidato.", file=sys.stderr)
+        return False  # em erro, rejeita e tenta próximo candidato (temos até 10 antes de IA generativa)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
