@@ -78,13 +78,18 @@ def _validate_image(image_path: str, titulo: str) -> bool:
             f"or signage wall IS a photograph — not a graphic design — even if the backdrop contains large text or graphic elements. "
             f"Only reject here if the image contains NO real people or physical scenes at all.\n"
             f"→ If purely graphic/no real people or scenes: answer 'no' IMMEDIATELY. Stop here.\n\n"
-            f"STEP 2 — TEXT CONTENT (only if Step 1 passed):\n"
-            f"Does the image have text DIGITALLY OVERLAID on top of it (watermarks, title cards, "
-            f"captions, promotional text added in post-production)? "
-            f"Text that appears NATURALLY in the photographed scene is fine — "
-            f"banners at events, signs in the background, text on clothing, text on buildings. "
-            f"Only reject if text was ADDED ON TOP of the photo after it was taken.\n"
-            f"→ If digitally overlaid text: answer 'no'. Stop here.\n\n"
+            f"STEP 2 — TEXT IN THE IMAGE (only if Step 1 passed):\n"
+            f"This is a STOCK PHOTO for a Brazilian news blog. We want images without visible text.\n"
+            f"Would a typical viewer IMMEDIATELY NOTICE AND READ text when looking at this image? "
+            f"Apply this test: if the text is large enough to read without zooming in, it must be rejected.\n"
+            f"→ REJECT ('no') if: someone holding a sign, poster, or banner WITH READABLE WORDS towards the camera.\n"
+            f"→ REJECT ('no') if: product packaging, labels, or props with clearly readable words fill a "
+            f"significant portion of the image.\n"
+            f"→ REJECT ('no') if: there is a digital watermark or text overlay on the photo.\n"
+            f"→ ACCEPT if: the image has no text, or only small incidental text that a viewer would not "
+            f"notice or read (tiny equipment labels, distant storefronts, blurry background signs).\n"
+            f"→ ACCEPT if: the only text is on tiny items in the background that require zooming in to read.\n"
+            f"→ If clearly readable prominent text exists: answer 'no'. Stop here.\n\n"
             f"STEP 3 — CULTURAL CONTEXT (only if Steps 1 and 2 passed):\n"
             f"This image will be used on a Brazilian news blog about events in São Paulo state, Brazil. "
             f"If the image shows people, do they appear in a cultural context clearly incompatible with Brazil? "
@@ -107,8 +112,11 @@ def _validate_image(image_path: str, titulo: str) -> bool:
                 types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
             ],
         )
-        answer = response.text.strip().lower()
-        valid = answer.startswith("yes")
+        # Extrai a última palavra "yes" ou "no" — Gemini às vezes formata
+        # os steps por extenso antes de dar a resposta final.
+        import re as _re
+        words = _re.findall(r"\b(yes|no)\b", response.text.strip().lower())
+        valid = words[-1] == "yes" if words else False
         if not valid:
             print(f"[image_generate] Imagem rejeitada pela vision (não-foto/irrelevante/texto): {image_path}", file=sys.stderr)
         return valid

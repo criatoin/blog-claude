@@ -379,8 +379,11 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
                 types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
             ],
         )
-        answer = response.text.strip().lower()
-        relevant = answer.startswith("yes")
+        # Extrai a última palavra "yes" ou "no" da resposta — Gemini às vezes
+        # formata os steps por extenso antes de dar a resposta final.
+        import re as _re
+        words = _re.findall(r"\b(yes|no)\b", response.text.strip().lower())
+        relevant = words[-1] == "yes" if words else False
         if not relevant:
             print(f"[run_releases] Imagem rejeitada (logo/não-foto/irrelevante) para '{titulo[:50]}' — usando Unsplash/Gemini.", file=sys.stderr)
         else:
