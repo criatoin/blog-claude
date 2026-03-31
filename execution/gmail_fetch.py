@@ -20,6 +20,7 @@ import argparse
 import imaplib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from email import message_from_bytes
@@ -27,6 +28,7 @@ from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import requests as _requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -83,6 +85,77 @@ def _extract_body(msg) -> tuple[str, str]:
             pass
 
     return text, html
+
+
+def _fetch_external_photos(body_text: str, msg_id: str, output_dir: Path) -> list[str]:
+    """
+    Baixa fotos de links externos no corpo do email (Flickr álbum).
+    Retorna lista de caminhos salvos.
+    """
+    saved = []
+
+    # Detecta links de álbum Flickr: flic.kr/s/... ou flickr.com/.../sets/...
+    flickr_links = re.findall(
+        r'https?://(?:flic\.kr/s/\S+|www\.flickr\.com/photos/[^\s]+/sets/[^\s]+)',
+        body_text
+    )
+    if not flickr_links:
+        return []
+
+    album_url = flickr_links[0].strip().rstrip('/')
+    print(f"[gmail_fetch] Álbum Flickr encontrado: {album_url}", file=sys.stderr)
+
+    try:
+        resp = _requests.get(
+            album_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+            timeout=15,
+            allow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return []
+
+        html = resp.text
+        # Extrai IDs de foto do álbum
+        user_match = re.search(r'/photos/([^/]+)/sets/', resp.url)
+        if not user_match:
+            return []
+        flickr_user = user_match.group(1)
+        photo_ids = list(dict.fromkeys(re.findall(rf'/photos/{re.escape(flickr_user)}/(\d+)/', html)))
+
+        if not photo_ids:
+            return []
+
+        print(f"[gmail_fetch] {len(photo_ids)} fotos no álbum Flickr, baixando até 5.", file=sys.stderr)
+
+        for i, pid in enumerate(photo_ids[:5]):
+            try:
+                # Pega thumbnail via oembed e converte para versão _b (large ~1024px)
+                oembed = _requests.get(
+                    f"https://www.flickr.com/services/oembed/?url=https://www.flickr.com/photos/{flickr_user}/{pid}&format=json",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=10,
+                )
+                if oembed.status_code != 200:
+                    continue
+                thumb = oembed.json().get("url", "")
+                if not thumb:
+                    continue
+                large = re.sub(r'_[a-z]\.jpg$', '_b.jpg', thumb)
+                img_resp = _requests.get(large, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                if img_resp.status_code != 200 or len(img_resp.content) < 20000:
+                    continue
+                dest = output_dir / f"{msg_id}_flickr_{pid}.jpg"
+                dest.write_bytes(img_resp.content)
+                saved.append(str(dest))
+                print(f"[gmail_fetch] Foto Flickr salva: {dest.name} ({len(img_resp.content)//1024}KB)", file=sys.stderr)
+            except Exception as e:
+                print(f"[gmail_fetch] Falha ao baixar foto Flickr {pid}: {e}", file=sys.stderr)
+
+    except Exception as e:
+        print(f"[gmail_fetch] Falha ao acessar álbum Flickr: {e}", file=sys.stderr)
+
+    return saved
 
 
 def _save_attachments(msg, msg_id: str, output_dir: Path) -> list[str]:
@@ -160,6 +233,10 @@ def fetch_emails(max_results: int, output_dir: Path) -> list[dict]:
 
             body_text, body_html = _extract_body(msg)
             attachments = _save_attachments(msg, uid.decode(), output_dir)
+
+            # Se não há anexos de imagem, tenta baixar fotos de links externos (ex: Flickr)
+            if not attachments and body_text:
+                attachments = _fetch_external_photos(body_text, uid.decode(), output_dir)
 
             emails.append({
                 "id": message_id,
