@@ -100,9 +100,14 @@ def _validate_image(image_path: str, titulo: str) -> bool:
             f"Diverse casual clothing is fine. Only reject if cultural dress markers are CLEARLY and PROMINENTLY visible.\n"
             f"→ If clearly culturally incompatible: answer 'no'. Stop here.\n\n"
             f"STEP 4 — RELEVANCE (only if Steps 1, 2 and 3 passed):\n"
-            f"Is this a real photograph visually related to: '{titulo}'?\n"
-            f"→ If NO: answer 'no'.\n"
-            f"→ If YES: answer 'yes'."
+            f"This is a STOCK PHOTO that will illustrate an article titled: '{titulo}'.\n"
+            f"Stock photos never show the specific venue, organization, or event by name — they show the THEME.\n"
+            f"→ ACCEPT ('yes') if the image depicts the general theme, activity, or type of people involved "
+            f"(e.g. for a children's Easter event: children playing, kids doing crafts, Easter eggs, community celebration).\n"
+            f"→ REJECT ('no') only if the image is completely unrelated to the topic "
+            f"(e.g. a car race photo for a cooking event, a beach photo for a theater show).\n"
+            f"→ If the image fits the general theme: answer 'yes'.\n"
+            f"→ If completely unrelated: answer 'no'."
         )
 
         response = client.models.generate_content(
