@@ -348,28 +348,24 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         img_bytes = buf.getvalue()
 
         prompt = (
-            f"Analyze this image in two strict sequential steps. Answer ONLY 'yes' or 'no'.\n\n"
-            f"STEP 1 — IMAGE TYPE (check this first, before anything else):\n"
-            f"Is this image a logo, wordmark, brand identity, corporate seal, typographic design, "
-            f"graphic design, illustration, flyer, poster, banner, infographic, or any image where "
-            f"text or brand elements are the PRIMARY visual content?\n"
-            f"→ If YES to any of these: answer 'no' IMMEDIATELY. Do not proceed to Step 2.\n\n"
+            f"This image came attached to a press release from a Brazilian city hall. "
+            f"Analyze it in two strict sequential steps. Answer ONLY 'yes' or 'no'.\n\n"
+            f"STEP 1 — IMAGE TYPE:\n"
+            f"Is this image PRIMARILY a graphic design piece (logo, flyer, poster, infographic, "
+            f"corporate seal, illustration) where TEXT or BRAND ELEMENTS dominate the visual?\n"
+            f"→ If the image is a REAL PHOTOGRAPH of people, places, or events — even if it has "
+            f"incidental text on signs or banners — answer 'yes' and continue.\n"
+            f"→ Only answer 'no' (reject) if the image is clearly a graphic design, not a photo.\n\n"
             f"STEP 2 — CULTURAL CONTEXT (only if Step 1 passed):\n"
-            f"This image will be used on a Brazilian news blog about events in São Paulo state, Brazil. "
-            f"If the image shows people, do they appear in a cultural context clearly incompatible with Brazil? "
-            f"Reject if you can clearly identify: hijabs or Islamic dress, saris or South Asian traditional clothing, "
-            f"East Asian traditional costumes, or any other cultural markers that would make a Brazilian reader "
-            f"immediately think 'this is not from Brazil or Latin America'. "
-            f"Neutral settings (stages, gyms, offices, classrooms) are fine. Diverse casual clothing is fine. "
-            f"Only reject if cultural dress markers are CLEARLY and PROMINENTLY visible.\n"
-            f"→ If clearly culturally incompatible: answer 'no'. Do not proceed to Step 3.\n\n"
-            f"STEP 3 — RELEVANCE (only if Steps 1 and 2 passed):\n"
-            f"Is this a real photograph (taken with a camera) that is visually related to: '{titulo}'?\n"
-            f"→ If NO: answer 'no'.\n"
-            f"→ If YES: answer 'yes'.\n\n"
-            f"Remember: a logo is NOT a real photograph even if related to the topic. "
-            f"Event banners, signs on clothing, and text in the background of a real photo are fine — "
-            f"they are part of the scene, not digitally added."
+            f"This image will appear on a Brazilian news blog. "
+            f"Does the image show people in cultural dress CLEARLY incompatible with Brazil "
+            f"(hijab, sari, East Asian traditional costume)? "
+            f"Casual clothing, school uniforms, stage costumes, and local event attire are all fine.\n"
+            f"→ Only answer 'no' (reject) if incompatible cultural markers are UNMISTAKABLY visible.\n"
+            f"→ Otherwise answer 'yes'.\n\n"
+            f"Post title for context (do NOT use this to reject the image — it's just context): '{titulo}'\n\n"
+            f"IMPORTANT: This is a real press release photo. Err on the side of accepting. "
+            f"Only reject if the image is clearly a graphic/logo (Step 1) or clearly foreign cultural dress (Step 2)."
         )
 
         response = client.models.generate_content(
@@ -431,31 +427,54 @@ def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
 def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str]:
     """
     Seleciona ou gera imagem de capa.
-    Fluxo: 1) melhor anexo do email (se relevante) → 2) Unsplash → 3) Gemini
-    Retorna (cover_path, foto_credit). cover_path pode ser "" se falhar tudo.
+
+    Prioridade estrita:
+      1) Fotos do próprio email (anexos diretos ou álbuns Flickr baixados pelo gmail_fetch)
+         — tenta TODAS as fotos em ordem de score, aceita a primeira que _imagem_relevante aprovar.
+         Fotos reais do evento/local sempre preferidas sobre qualquer imagem gerada.
+      2) Banco de fotos gratuito (Unsplash → Pexels) — só se não houver NENHUMA foto do email.
+      3) Geração por IA (Gemini → OpenAI) — último recurso absoluto.
+
+    Retorna (cover_path, foto_credit).
     """
     attachments = email.get("attachments", [])
 
     if attachments:
-        sel_args = [str(SCRIPT_DIR / "image_select.py"), "--images"] + attachments
-        sel_result = _run_json(sel_args)
-        if sel_result and sel_result.get("path"):
-            if titulo and not _imagem_relevante(sel_result["path"], titulo):
-                print(f"[run_releases] Pulando anexo irrelevante, buscando no Unsplash.", file=sys.stderr)
-            else:
-                proc_result = _run_json([
-                    str(SCRIPT_DIR / "image_process.py"),
-                    "--input", sel_result["path"],
-                    "--slug", slug,
-                    "--output-dir", OUTPUT_DIR,
-                ])
-                if proc_result and proc_result.get("path"):
-                    # Crédito vem do release (extraído pelo LLM)
-                    return proc_result["path"], ""
+        # Pontua e ordena todas as fotos do email por score (melhor primeiro)
+        import subprocess as _sp
+        scored = []
+        for att in attachments:
+            r = _run_json([str(SCRIPT_DIR / "image_select.py"), "--images", att])
+            if r and r.get("score", -1) >= 0:
+                scored.append(r)
+        scored.sort(key=lambda x: x.get("score", 0), reverse=True)
 
-    # Gera imagem via Unsplash/Pexels/Gemini/OpenAI
+        print(f"[run_releases] {len(scored)} foto(s) do email para avaliar.", file=sys.stderr)
+
+        for candidate in scored:
+            cpath = candidate.get("path")
+            if not cpath:
+                continue
+            if titulo and not _imagem_relevante(cpath, titulo):
+                print(f"[run_releases] Foto do email rejeitada (vision): {Path(cpath).name}", file=sys.stderr)
+                continue
+            # Foto aprovada — processa e retorna
+            proc_result = _run_json([
+                str(SCRIPT_DIR / "image_process.py"),
+                "--input", cpath,
+                "--slug", slug,
+                "--output-dir", OUTPUT_DIR,
+            ])
+            if proc_result and proc_result.get("path"):
+                print(f"[run_releases] Usando foto do email: {Path(cpath).name}", file=sys.stderr)
+                return proc_result["path"], ""
+
+        print(f"[run_releases] Nenhuma foto do email aprovada. Tentando bancos de imagem.", file=sys.stderr)
+
+    # Só chega aqui se não havia fotos no email ou todas foram rejeitadas pela vision.
+    # Tenta Unsplash/Pexels antes de gerar por IA.
     img_query = _gerar_query_imagem(titulo)
-    print(f"[run_releases] Gerando imagem para slug={slug} | query='{img_query}'...", file=sys.stderr)
+    print(f"[run_releases] Buscando imagem em bancos gratuitos | query='{img_query}'...", file=sys.stderr)
     gen_result = _run_json([
         str(SCRIPT_DIR / "image_generate.py"),
         "--query", img_query,
@@ -464,6 +483,8 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str
         "--output-dir", OUTPUT_DIR,
     ])
     if gen_result and gen_result.get("path"):
+        source = gen_result.get("source", "?")
+        print(f"[run_releases] Imagem obtida via {source}.", file=sys.stderr)
         return gen_result["path"], gen_result.get("credit", "")
 
     return "", ""

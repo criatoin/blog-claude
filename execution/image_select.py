@@ -10,7 +10,9 @@ Score 0-8:
   +1  tamanho do arquivo < 8MB
   +1  orientação landscape
 
-Threshold de aprovação: score >= 4
+Threshold de aprovação: score >= 2
+(baixo por design — fotos reais de email/Flickr valem mais que geradas por IA,
+mesmo sendo portrait ou resolução menor. A validação de conteúdo fica para _imagem_relevante.)
 
 Uso:
     python execution/image_select.py --images .tmp/a.jpg .tmp/b.png
@@ -18,7 +20,7 @@ Uso:
 Saída JSON para stdout:
     {"path": ".tmp/a.jpg", "score": 6, "width": 1920, "height": 1080, "reason": "..."}
     ou
-    {"path": null, "score": 0, "reason": "Nenhuma imagem atingiu score mínimo de 4"}
+    {"path": null, "score": 0, "reason": "Nenhuma imagem atingiu score mínimo de 2"}
 """
 
 import argparse
@@ -30,7 +32,7 @@ from pathlib import Path
 from PIL import Image
 
 
-SCORE_THRESHOLD = 4
+SCORE_THRESHOLD = 2
 
 
 def score_image(path: str) -> dict:
@@ -47,6 +49,10 @@ def score_image(path: str) -> dict:
 
     file_size_mb = p.stat().st_size / (1024 * 1024)
     ratio = width / height if height > 0 else 0
+
+    # Logos e artefatos gráficos tendem a ser muito pequenos — descartar automaticamente
+    if file_size_mb < 0.1:
+        return {"path": path, "score": 0, "reason": f"Arquivo < 100KB ({file_size_mb*1024:.0f}KB) — provável logo ou ícone"}
 
     score = 0
     reasons = []
