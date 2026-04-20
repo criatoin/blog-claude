@@ -32,7 +32,7 @@ from pathlib import Path
 from PIL import Image
 
 
-SCORE_THRESHOLD = 2
+SCORE_THRESHOLD = 1
 
 
 def score_image(path: str) -> dict:
@@ -50,9 +50,10 @@ def score_image(path: str) -> dict:
     file_size_mb = p.stat().st_size / (1024 * 1024)
     ratio = width / height if height > 0 else 0
 
-    # Logos e artefatos gráficos tendem a ser muito pequenos — descartar automaticamente
-    if file_size_mb < 0.1:
-        return {"path": path, "score": 0, "reason": f"Arquivo < 100KB ({file_size_mb*1024:.0f}KB) — provável logo ou ícone"}
+    # Logos e ícones são tipicamente < 20KB — descartar automaticamente
+    # 100KB era muito alto: fotos reais comprimidas de prefeitura chegam a 70-104KB
+    if file_size_mb < 0.02:
+        return {"path": path, "score": 0, "reason": f"Arquivo < 20KB ({file_size_mb*1024:.0f}KB) — provável logo ou ícone"}
 
     score = 0
     reasons = []

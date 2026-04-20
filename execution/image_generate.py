@@ -127,8 +127,14 @@ def _validate_image(image_path: str, titulo: str) -> bool:
         return valid
 
     except Exception as e:
+        err_str = str(e)
+        # 503 = sobrecarga temporária do servidor Gemini — não é sinal de imagem ruim.
+        # Aceitar o candidato para não descartar todos por indisponibilidade de API.
+        if "503" in err_str or "UNAVAILABLE" in err_str:
+            print(f"[image_generate] Vision API indisponível (503), aceitando candidato sem validar.", file=sys.stderr)
+            return True
         print(f"[image_generate] Aviso: validação vision falhou ({e}), rejeitando candidato.", file=sys.stderr)
-        return False  # em erro, rejeita e tenta próximo candidato (temos até 10 antes de IA generativa)
+        return False
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

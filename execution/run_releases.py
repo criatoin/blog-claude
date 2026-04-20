@@ -387,8 +387,14 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         return relevant
 
     except Exception as e:
+        err_str = str(e)
+        # 503 = sobrecarga temporária do servidor Gemini — aceitar o anexo para não
+        # descartar foto real de prefeitura por indisponibilidade de API.
+        if "503" in err_str or "UNAVAILABLE" in err_str:
+            print(f"[run_releases] Vision API indisponível (503), aceitando foto do email sem validar.", file=sys.stderr)
+            return True
         print(f"[run_releases] Aviso: verificação de relevância falhou ({e}), rejeitando imagem por precaução.", file=sys.stderr)
-        return False  # em caso de erro, rejeita → vai para Unsplash (mais seguro)
+        return False
 
 
 def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
