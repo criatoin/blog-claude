@@ -127,10 +127,15 @@ def _validate_image(image_path: str, titulo: str) -> bool:
         return valid
 
     except Exception as e:
+        # Detecta sobrecarga temporária do Gemini (503/UNAVAILABLE) com checagem
+        # precisa: verifica código HTTP na exception ou texto canônico da API Google.
         err_str = str(e)
-        # 503 = sobrecarga temporária do servidor Gemini — não é sinal de imagem ruim.
-        # Aceitar o candidato para não descartar todos por indisponibilidade de API.
-        if "503" in err_str or "UNAVAILABLE" in err_str:
+        is_server_overload = (
+            "'code': 503" in err_str
+            or '"code": 503' in err_str
+            or "503 UNAVAILABLE" in err_str
+        )
+        if is_server_overload:
             print(f"[image_generate] Vision API indisponível (503), aceitando candidato sem validar.", file=sys.stderr)
             return True
         print(f"[image_generate] Aviso: validação vision falhou ({e}), rejeitando candidato.", file=sys.stderr)
