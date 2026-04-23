@@ -43,6 +43,7 @@ def _run(args: list[str], capture: bool = True) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["python"] + args,
         capture_output=capture, text=True,
+        encoding="utf-8", errors="replace",
         cwd=str(PROJECT_DIR),
     )
 

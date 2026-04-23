@@ -89,6 +89,8 @@ def _run(args: list[str], capture: bool = True) -> subprocess.CompletedProcess:
         ["python"] + args,
         capture_output=capture,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         cwd=str(PROJECT_DIR),
     )
 
@@ -422,6 +424,7 @@ def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
     if resumo:
         user += f"\nSummary: {resumo[:300]}"
     try:
+        from llm_call import llm_call
         raw = llm_call(system=system, user=user)
         # Pega apenas a primeira linha não-vazia — LLM às vezes retorna lista
         query = next((l.strip().strip('"').strip("'") for l in raw.splitlines() if l.strip()), "")
