@@ -67,7 +67,6 @@ def _load_processed_from_sheets() -> set:
         return {
             (r.get("assunto", "").strip().lower(), r.get("origem_email", "").strip().lower())
             for r in result
-            if r.get("status") not in ("Descartado",)
         }
     except Exception as e:
         print(f"[run_releases] Aviso: falha ao carregar dedup do Sheets: {e}", file=sys.stderr)

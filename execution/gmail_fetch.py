@@ -199,8 +199,12 @@ def fetch_emails(max_results: int, output_dir: Path) -> list[dict]:
         print(f"[gmail_fetch] Falha ao conectar IMAP: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Busca não lidos (UNSEEN)
-    status, data = conn.search(None, "UNSEEN")
+    # Busca emails das últimas 3h (SINCE) — captura tanto UNSEEN quanto SEEN
+    # necessário porque clientes de email (Outlook, celular) podem marcar como lido
+    # antes do pipeline processar. O dedup do Sheets evita reprocessamento.
+    from datetime import datetime, timedelta, timezone as _tz
+    cutoff = (datetime.now(_tz.utc) - timedelta(hours=3)).strftime("%d-%b-%Y")
+    status, data = conn.search(None, f'SINCE "{cutoff}"')
     if status != "OK":
         conn.logout()
         return []
@@ -248,8 +252,8 @@ def fetch_emails(max_results: int, output_dir: Path) -> list[dict]:
                 "attachments": attachments,
             })
 
-            # Marca como lido para não processar novamente
-            conn.store(uid, "+FLAGS", "\\Seen")
+            # NÃO marca como lido — dedup via Sheets evita reprocessamento
+            # (marcar \Seen causava perda de emails quando o pipeline crashava)
 
         except Exception as e:
             print(f"[gmail_fetch] Erro ao processar email {uid}: {e}", file=sys.stderr)
