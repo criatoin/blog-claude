@@ -2,7 +2,8 @@
 **Data:** 2026-05-11  
 **Escopo:** `execution/editorial.py` (novo) + `execution/run_releases.py` + `execution/telegram_notify.py` + `execution/instagram_image.py`  
 **Fase:** 1 — somente pipeline de releases. Pautas ficam para fase 2.  
-**Status:** Aprovado para implementação
+**Status:** Aprovado para implementação  
+**Revisão:** 2026-05-11 — legenda_longa aprovada; regra de créditos WordPress adicionada (item 15)
 
 ---
 
@@ -104,7 +105,9 @@ formas de inscrição.
 }
 ```
 
-`creditos_texto` e `creditos_fotos` extraídos do release quando presentes (assessoria, fotógrafo, MTb, etc.).
+`creditos_texto`: nome do autor, assessoria ou MTb quando mencionados no release (ex: `"João Coutinho (MTb 35.570), CULTSP PRO"`).  
+`creditos_fotos`: fonte das imagens quando mencionada (ex: `"Divulgação"`, `"Foto: Arquivo pessoal"`).  
+Esses campos alimentam `creditos_wordpress` em `gerar_conteudo()` — não aparecem em nenhum outro campo do post.
 
 ---
 
@@ -171,9 +174,10 @@ formas de inscrição.
     "badge": "",
     "alerta": ""
   },
-  "creditos": {
+  "creditos_wordpress": {
     "texto": "",
-    "fotos": ""
+    "fotos": "",
+    "usar_apenas_no_html_wordpress": true
   }
 }
 ```
@@ -186,11 +190,31 @@ formas de inscrição.
 - `titulo_principal` (arte): máx 6 palavras
 - `linha_apoio` (arte): máx 12 palavras
 
-**Créditos no HTML:** o bloco de créditos é inserido automaticamente ao final do `html` no formato:
+**Créditos — uso exclusivo no HTML do WordPress:**
+
+O campo `creditos_wordpress` é montado pela função a partir dos dados de `extrair_fatos()` e do sender do email. Regras de montagem:
+
+| Situação | `creditos_wordpress.texto` |
+|----------|---------------------------|
+| Release tem crédito de texto/assessoria | `[nome], com informações de [assessoria/fonte], reescrito pela equipe do +blog` |
+| Só sender disponível | `reescrito pela equipe do +blog com informações de [sender]` |
+| Nenhum dado | `reescrito pela equipe do +blog` |
+
+| Situação | `creditos_wordpress.fotos` |
+|----------|---------------------------|
+| Release tem crédito de foto | `[crédito original]` |
+| Nenhum crédito de foto | `Divulgação` |
+
+O bloco é inserido **somente no `html`** ao final, como parágrafo discreto:
 ```html
-<p><em>Texto: [creditos.texto], reescrito pela equipe do +blog. Fotos: [creditos.fotos]</em></p>
+<p><em>Texto: [creditos_wordpress.texto]. Fotos: [creditos_wordpress.fotos]</em></p>
 ```
-Se `creditos.texto` vier vazio dos fatos, usa o sender do email como fallback. Se `creditos.fotos` vier vazio, usa "Divulgação".
+
+**Os créditos NÃO aparecem em:** legenda do Instagram, texto da arte, resumo do Telegram, título, subtítulo, card de aprovação.
+
+**Regras invioláveis:**
+- Nunca remover créditos quando vierem no release
+- Nunca inventar créditos que não estejam no release
 
 **Fallback:** retorna dict com campos vazios + `titulo_site` derivado do assunto do email.
 
@@ -306,7 +330,7 @@ Se `creditos.texto` vier vazio dos fatos, usa o sender do email como fallback. S
     └─ recebe --card-meta (JSON) com resumo_telegram
 ```
 
-> **NOTA — legenda_contexto no Sheets:** a spec não adiciona coluna nova automaticamente. A decisão de criar uma coluna `legenda_longa` na aba Legendas IG fica para o editor decidir antes da implementação. Por ora, `legenda_contexto` é descartada (não salva). Se o usuário quiser preservá-la, criar a coluna `legenda_longa` na aba Legendas IG e ajustar `sheets_write.py` para incluí-la. **Decisão pendente do usuário.**
+> **NOTA — legenda_contexto no Sheets:** coluna `legenda_longa` **aprovada**. Criar na aba Legendas IG antes da implementação. `sheets_write.py` deve ser ajustado para gravar `legendas["legenda_contexto"]` nessa coluna. O campo `legenda_curta` continua sendo o padrão para uso imediato; `legenda_longa` fica disponível para o editor escolher a alternativa.
 
 ---
 
@@ -399,12 +423,6 @@ Sempre que faltar dado, a IA é conservadora:
 | Cidade não clara | campo `cidade` = "" + `observacoes` com alerta |
 | Data não confirmada | não usar CTA "salva pra não esquecer" |
 | Inscrição não confirmada | não mencionar inscrição |
-
----
-
-## Decisão pendente
-
-**Legenda longa no Sheets:** criar coluna `legenda_longa` na aba Legendas IG para armazenar `legenda_contexto` separadamente? Impacta `sheets_write.py` e o setup da planilha. Recomendo criar — é um campo valioso. Decisão do usuário antes de iniciar a implementação.
 
 ---
 
