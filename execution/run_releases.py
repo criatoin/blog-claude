@@ -381,7 +381,8 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     card_meta = resumo_telegram(post, validacao, avaliacao)
 
     # 9. HTML com bloco de créditos ao final (exclusivo WordPress)
-    credito_texto = creditos.get("texto", "").strip() or f"reescrito pela equipe do +blog com informações de {sender}"
+    sender_clean = sender.split("<")[0].strip() or sender.split("@")[0]
+    credito_texto = creditos.get("texto", "").strip() or f"reescrito pela equipe do +blog com informações de {sender_clean}"
     creditos_html = f'<p><em>Texto: {credito_texto}. Fotos: {foto_credit}</em></p>'
     html_com_creditos = html + "\n" + creditos_html
 
@@ -444,7 +445,9 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     ]
     if ig_path:
         notify_args += ["--ig-image", ig_path, "--ig-caption", legenda_curta]
-    _run(notify_args)
+    notify_result = _run(notify_args)
+    if notify_result.returncode != 0:
+        print(f"[run_releases]   Aviso: telegram_notify falhou ({notify_result.returncode}):\n{notify_result.stderr[:300]}", file=sys.stderr)
 
     print(f"[run_releases]   Rascunho #{post_id} criado. Card enviado ao Telegram.", file=sys.stderr)
 
