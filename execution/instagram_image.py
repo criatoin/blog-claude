@@ -2,10 +2,10 @@
 instagram_image.py — Gera arte para Instagram via composição Pillow.
 
 Template +blog — padrão Ameriafro — 4 camadas:
-  1. Foto full-bleed (ImageOps.fit cover, contrast/color/sharpness)
-  2. Degradê overlay magenta→roxo (alpha máx 210, nunca 255)
-  3. Textos: tag categoria + título + linha de apoio
-  4. Logo centralizado no rodapé
+  1. Blur full-bleed (cobre todo o canvas) + escurecimento
+  2. Foto principal proporcional ancorada no topo (fit_width)
+  3. Degradê overlay magenta→roxo (alpha máx 210, nunca 255)
+  4. Textos: tag categoria + título + linha de apoio + logo
 
 Formato: 1080×1350px WebP, <1MB
 
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 load_dotenv()
 
@@ -39,7 +39,6 @@ QUALITY_STEPS  = [85, 75, 65, 55]
 PROJECT_DIR = Path(__file__).parent.parent
 LOGO_PATH   = str(PROJECT_DIR / "assets" / "logo" / "Logo +blog rosa.png")
 
-# Busca de fontes: Poppins-Bold local primeiro, depois fallbacks do sistema
 _FONT_SEARCH_DIRS = [
     str(PROJECT_DIR / "assets" / "fonts"),
     "/usr/share/fonts",
@@ -93,19 +92,37 @@ def generate_ig_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{slug}_ig.webp"
 
-    # ── CAMADA 1: Foto full-bleed ──────────────────────────────────────────────
-    bg = Image.open(cover_path).convert("RGBA")
-    # centering=(0.5, 0.3): ancora no terço superior, preserva rostos
-    bg = ImageOps.fit(bg, (W, H), method=Image.LANCZOS, centering=(0.5, 0.3))
-    bg = ImageEnhance.Contrast(bg).enhance(1.15)
-    bg = ImageEnhance.Color(bg).enhance(1.20)
-    bg = ImageEnhance.Sharpness(bg).enhance(1.10)
-    canvas = bg.copy()
+    # ── CAMADA 1: Blur cobre TODO o canvas ────────────────────────────────────
+    src = Image.open(cover_path).convert("RGBA")
 
-    # ── CAMADA 2: Degradê overlay (nunca sólido, alpha máx 210) ───────────────
+    # cover crop manual: max(scale_x, scale_y) garante que não sobra área vazia
+    scale = max(W / src.width, H / src.height)
+    bw = int(src.width * scale)
+    bh = int(src.height * scale)
+    bg = src.resize((bw, bh), Image.LANCZOS)
+    left = (bw - W) // 2
+    top  = max(0, (bh - H) // 3)  # ancora no terço superior
+    bg = bg.crop((left, top, left + W, top + H))
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=22))
+    dark = Image.new("RGBA", (W, H), (0, 0, 0, 90))
+    bg = Image.alpha_composite(bg, dark)
+    canvas = bg.copy()  # canvas COMEÇA como blur — nunca Image.new vazio
+
+    # ── CAMADA 2: Foto principal proporcional (fit_width, sem corte vertical) ─
+    photo = src.copy()
+    scale2 = W / photo.width
+    pw = W
+    ph = int(photo.height * scale2)
+    photo = photo.resize((pw, ph), Image.LANCZOS)
+    photo = ImageEnhance.Contrast(photo).enhance(1.15)
+    photo = ImageEnhance.Color(photo).enhance(1.20)
+    photo = ImageEnhance.Sharpness(photo).enhance(1.10)
+    canvas.alpha_composite(photo, (0, 0))  # ancora no topo
+
+    # ── CAMADA 3: Degradê overlay (nunca sólido, alpha máx 210) ───────────────
     grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     dg   = ImageDraw.Draw(grad)
-    S, M, E = 580, 810, H   # start, strong, end
+    S, M, E = 580, 810, H
 
     for y in range(H):
         if y < S:
@@ -118,14 +135,14 @@ def generate_ig_image(
             dg.line([(0, y), (W, y)], fill=(r, 0, b, a))
         else:
             p = min(1.0, (y - M) / (E - M))
-            r = int(230 - (230 - 59) * p)   # 230 → 59
-            b = int(126 + (95 - 126) * p)   # 126 → 95
-            a = int(185 + (210 - 185) * p)  # 185 → 210 (nunca 255)
+            r = int(230 - (230 - 59) * p)
+            b = int(126 + (95 - 126) * p)
+            a = int(185 + (210 - 185) * p)
             dg.line([(0, y), (W, y)], fill=(r, 0, b, a))
 
     canvas.alpha_composite(grad)
 
-    # ── CAMADA 3: Textos ───────────────────────────────────────────────────────
+    # ── CAMADA 4: Textos ───────────────────────────────────────────────────────
     d = ImageDraw.Draw(canvas)
 
     # Tag de categoria
@@ -134,38 +151,47 @@ def generate_ig_image(
     bb     = d.textbbox((0, 0), cat_up, font=ft)
     tw     = bb[2] - bb[0]
     th     = bb[3] - bb[1]
-    TX, TY, PW, PH = 68, 660, 32, 14
+    TX, TY, PW, PH = 68, 720, 32, 14  # TAG_Y=720 (mais baixo que 660)
     rect = [TX, TY, TX + tw + PW * 2, TY + th + PH * 2]
     d.rounded_rectangle(rect, radius=8, fill=(221, 230, 0))
     d.text((TX + PW, TY + PH), cat_up, font=ft, fill=(0, 0, 0))
     tag_bottom = rect[3]
 
-    # Título — grupos de 2 palavras por linha, fonte máxima que cabe em 940px
+    # Título — grupos de 2 palavras por linha, tamanho máximo que cabe em 940px
     words  = title.split()
     linhas = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
-    fs = 105
-    while fs >= 72:
-        fti = _load_font(fs, "black")
-        if max(d.textlength(l, font=fti) for l in linhas) <= 940:
+
+    tamanho = 105
+    fonte_ok = None
+    while tamanho >= 56:
+        fti = _load_font(tamanho, "black")
+        linha_mais_longa = max(d.textlength(l, font=fti) for l in linhas)
+        if linha_mais_longa <= 940:
+            fonte_ok = fti
             break
-        fs -= 2
+        tamanho -= 2
+
+    if fonte_ok is None:
+        # Fallback: 1 palavra por linha com fonte mínima
+        fonte_ok = _load_font(56, "black")
+        linhas = words
+
     ty = tag_bottom + 22
     for linha in linhas:
-        d.text((68, ty), linha, font=fti, fill=(255, 255, 255))
-        ty += int(fti.size * 1.08)
+        d.text((68, ty), linha, font=fonte_ok, fill=(255, 255, 255))
+        ty += int(fonte_ok.size * 1.08)
 
-    # Linha de apoio
+    # Linha de apoio — sem truncagem, quebra automática em 940px
     if subtitle:
         fa = _load_font(38, "regular")
         ay = ty + 32
-        for linha in _quebrar_linhas(subtitle, fa, 940, d)[:2]:
+        for linha in _quebrar_linhas(subtitle, fa, 940, d):
             d.text((68, ay), linha, font=fa, fill=(255, 255, 255))
             ay += int(fa.size * 1.35)
 
-    # ── CAMADA 4: Logo no rodapé ───────────────────────────────────────────────
+    # ── Logo no rodapé ─────────────────────────────────────────────────────────
     try:
         logo = Image.open(LOGO_PATH).convert("RGBA")
-        # Remove fundo branco/quase-branco
         data = logo.getdata()
         logo.putdata([
             (r, g, b, 0) if r > 230 and g > 230 and b > 230 else (r, g, b, a)
