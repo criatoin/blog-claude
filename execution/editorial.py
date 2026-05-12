@@ -193,7 +193,6 @@ Retorne APENAS um objeto JSON válido (sem markdown):
 {{
   "titulo_site": "título SEO máx 65 chars",
   "titulo_social": "título leve para redes sociais",
-  "titulo_arte": "máx 6 palavras sem ponto final",
   "subtitulo": "subtítulo do post ou vazio",
   "slug": "slug-sem-acentos-com-hifens",
   "categoria": "nome da categoria",
@@ -202,10 +201,10 @@ Retorne APENAS um objeto JSON válido (sem markdown):
   "resumo_telegram": "resumo de 2-3 frases para o editor no Telegram",
   "html": "<p>conteúdo completo...</p>",
   "texto_arte": {{
-    "titulo_principal": "máx 6 palavras",
-    "linha_apoio": "máx 12 palavras",
-    "badge": "categoria para o badge",
-    "alerta": ""
+    "titulo_principal": "até 6 palavras — força visual, sem ponto final",
+    "linha_apoio": "até 12 palavras — contextualiza sem virar parágrafo",
+    "badge": "1 ou 2 palavras em maiúsculas",
+    "alerta": "vazio se OK, ou aviso se faltou info para chamada segura"
   }},
   "creditos_wordpress": {{
     "texto": "crédito de texto adaptado",
@@ -214,7 +213,24 @@ Retorne APENAS um objeto JSON válido (sem markdown):
   }}
 }}
 
-REGRAS DE CRÉDITO (campo creditos_wordpress):
+════════════════════════════════
+REGRAS PARA texto_arte
+════════════════════════════════
+- titulo_principal: máx 6 palavras, SEM ponto final
+- titulo_principal NÃO pode ser igual ao titulo_site
+- titulo_principal NÃO pode conter: "imperdível", "confira", "não perca", "vem aí", "promete", "programação especial", "acontece em"
+- linha_apoio: máx 12 palavras, sem ponto final, não repetir o título
+- badge: 1 ou 2 palavras (ex: "LITERATURA", "MÚSICA", "CULTURA")
+- só usar "gratuito" ou "grátis" se gratuito=true nos fatos extraídos
+- só mencionar cidade, data ou local se estiverem nos fatos extraídos
+- titulo_principal deve ter força visual — prefira:
+    "Histórias que encantam", "Cultura preta na Estação", "Americana recebe Sarau Ameriafro"
+  em vez de:
+    "Evento acontece em Santa Bárbara", "Projeto leva magia da leitura para crianças"
+
+════════════════════════════════
+REGRAS DE CRÉDITO (campo creditos_wordpress)
+════════════════════════════════
 - texto: se o release tiver autor/assessoria/MTb → "[nome], com informações de [fonte], reescrito pela equipe do +blog"
   Se não houver → "reescrito pela equipe do +blog"
 - fotos: crédito de fotos do release ou "Divulgação"
@@ -251,9 +267,10 @@ Release original:
         return _FALLBACK
 
 
-def gerar_legenda(fatos: dict, resumo: str) -> dict:
+def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) -> dict:
     """
-    Gera legenda para Instagram com CTA rotativo.
+    Gera legenda para Instagram.
+    arte_instagram: dict com titulo_principal/linha_apoio/badge — evita repetir texto da arte.
     Sem créditos — créditos são exclusivos do HTML WordPress.
     """
     from llm_call import llm_call_json
@@ -265,53 +282,51 @@ def gerar_legenda(fatos: dict, resumo: str) -> dict:
         "hashtags": ["#maisblog", "#americana", "#culturaameri"],
     }
 
-    tem_data = bool(fatos.get("data") or fatos.get("horario"))
-    tem_programacao = bool(fatos.get("atracoes") and len(fatos["atracoes"]) > 1)
+    arte = arte_instagram or {}
+    arte_str = ""
+    if arte.get("titulo_principal"):
+        arte_str = f"badge: {arte.get('badge', '')}\ntitulo: {arte.get('titulo_principal', '')}\nlinha_apoio: {arte.get('linha_apoio', '')}"
 
-    ctas_disponiveis = [
-        "Marca quem iria com você.",
-        "Mais detalhes estão no nosso portal.",
-        "Quer ver mais rolês assim por aqui? Comenta 'eu quero'.",
-        "A gente colocou tudo no +blog pra você se programar melhor.",
-        "Já manda pra quem vive procurando o que fazer na região.",
-    ]
-    if tem_data:
-        ctas_disponiveis.insert(0, "Salva pra lembrar desse rolê.")
-    if tem_programacao:
-        ctas_disponiveis.append("A programação completa está no +blog.")
+    fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
 
     system = f"""{_VOZ_EDITORIAL}
 
-Você vai gerar duas versões de legenda para Instagram sobre este conteúdo.
+Você é social media do +blog. Crie duas versões de legenda para Instagram.
 
 ESTRUTURA DE CADA LEGENDA:
-1. Gancho (1 linha) — dado concreto, antes do "ver mais". SEM "Vem aí", "Confira", "Incrível".
-2. Corpo — 2 parágrafos curtos com detalhes úteis. Tom de amigo dando dica.
-3. CTA — escolha o mais natural entre as opções disponíveis.
-4. Hashtags — máx 5, regionais e específicas.
+1. Gancho (1 linha) — dado concreto que prende antes do "ver mais". SEM "Vem aí", "Confira", "Não perca".
+2. Corpo — 2 parágrafos curtos com detalhes úteis. Tom de amigo dando uma dica.
+3. CTA — variado conforme o conteúdo (não fixo em todos os posts).
+4. Hashtags — máx 5, específicas e regionais.
 
-CTAs disponíveis (escolha o mais adequado):
-{chr(10).join(f"- {c}" for c in ctas_disponiveis)}
+ESCOLHA DE CTA conforme o conteúdo:
+- evento com data confirmada → "Salva pra lembrar desse rolê."
+- evento cultural aberto → "Marca quem você levaria."
+- programação com mais detalhes → "A gente reuniu tudo no +blog pra você se programar."
+- conteúdo de serviço → "Todas as informações estão no link da bio."
+- conteúdo inspirador → "Já manda pra quem precisa ver isso."
 
-Retorne APENAS um objeto JSON:
+REGRAS ABSOLUTAS:
+- não inventar data, horário, local, cidade, valor ou gratuidade
+- não repetir mecanicamente o texto da arte
+- não usar "imperdível"
+- não usar linguagem institucional
+- máx 5 hashtags, específicas (não "#cultura" solto)
+- sem créditos de texto ou fotos
+- sem mencionar assessoria ou fonte
+
+Retorne APENAS um objeto JSON válido:
 {{
-  "legenda_curta": "versão direta e objetiva — uso padrão",
+  "legenda_curta": "versão direta e objetiva — gancho + corpo + cta + hashtags",
   "legenda_contexto": "versão alternativa com mais contexto — para o editor escolher",
   "cta_sugerido": "o CTA escolhido",
   "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#maisblog"]
-}}
+}}"""
 
-REGRAS ABSOLUTAS:
-- Máx 5 hashtags
-- SEM créditos de texto ou fotos nas legendas
-- SEM mencionar a assessoria ou fonte da notícia"""
-
-    fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
-    user = f"""Fatos do post:
-{fatos_str}
-
-Resumo da matéria:
-{resumo[:500]}"""
+    user_parts = [f"Fatos confirmados:\n{fatos_str}", f"Resumo da matéria:\n{resumo[:500]}"]
+    if arte_str:
+        user_parts.append(f"Texto usado na arte (não repetir mecanicamente):\n{arte_str}")
+    user = "\n\n".join(user_parts)
 
     try:
         result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
@@ -420,3 +435,101 @@ def query_from_fatos(fatos: dict, titulo: str) -> str:
     if fatos.get("categoria_editorial"):
         partes.append(fatos["categoria_editorial"])
     return " ".join(partes) or titulo[:60]
+
+
+# ─── Validação de texto da arte ──────────────────────────────────────────────
+
+_PALAVRAS_PROIBIDAS_ARTE = [
+    "imperdível", "confira", "não perca", "vem aí",
+    "programação especial", "promete", "acontece em",
+]
+
+
+def _fallback_titulo_arte(fatos: dict) -> str:
+    projeto = fatos.get("projeto", "").strip()
+    categoria = fatos.get("categoria_editorial", "Evento").strip()
+    cidade = fatos.get("cidade", "").strip()
+    if projeto and len(projeto.split()) <= 5:
+        return projeto
+    if cidade:
+        return f"{categoria} em {cidade}"
+    return categoria
+
+
+def _fallback_linha_arte(fatos: dict) -> str:
+    partes = []
+    if fatos.get("cidade"):
+        partes.append(fatos["cidade"])
+    if fatos.get("data"):
+        partes.append(fatos["data"])
+    elif fatos.get("local"):
+        partes.append(fatos["local"])
+    return ", ".join(partes) if partes else ""
+
+
+def validar_arte(arte: dict, fatos: dict, release_titulo: str = "") -> tuple[dict, list[str]]:
+    """
+    Valida e corrige o texto da arte antes de renderizar.
+    Nunca bloqueia o pipeline — aplica fallback determinístico se inválido.
+    Retorna (arte_corrigida, lista_de_alertas).
+    """
+    alertas: list[str] = []
+    titulo = arte.get("titulo_principal", "").strip()
+    linha  = arte.get("linha_apoio", "").strip()
+    badge  = arte.get("badge", "").strip()
+
+    # 1. Título existe
+    if not titulo:
+        alertas.append("titulo_principal vazio — aplicando fallback")
+        titulo = _fallback_titulo_arte(fatos)
+
+    # 2. Máx 6 palavras
+    palavras = titulo.split()
+    if len(palavras) > 6:
+        alertas.append(f"titulo_principal longo ({len(palavras)} palavras), truncado")
+        titulo = " ".join(palavras[:6])
+
+    # 3. Ponto final
+    if titulo.endswith("."):
+        titulo = titulo[:-1].strip()
+        alertas.append("ponto final removido do titulo_principal")
+
+    # 4. Palavras proibidas
+    titulo_lower = titulo.lower()
+    for proibida in _PALAVRAS_PROIBIDAS_ARTE:
+        if proibida in titulo_lower:
+            alertas.append(f"palavra proibida '{proibida}' no titulo_principal — fallback")
+            titulo = _fallback_titulo_arte(fatos)
+            break
+
+    # 5. "grátis/gratuito" sem confirmação
+    gratuito_confirmado = fatos.get("gratuito") is True
+    if not gratuito_confirmado:
+        for termo in ("gratuito", "grátis", "entrada franca"):
+            if termo in titulo.lower():
+                alertas.append(f"'{termo}' no título sem gratuito=true nos fatos — fallback")
+                titulo = _fallback_titulo_arte(fatos)
+                break
+            if termo in linha.lower():
+                alertas.append(f"'{termo}' na linha de apoio sem gratuito=true — removido")
+                linha = _fallback_linha_arte(fatos)
+                break
+
+    # 6. Igual ao título do release
+    if release_titulo and titulo.lower().strip() == release_titulo.lower().strip():
+        alertas.append("titulo_principal igual ao release — fallback")
+        titulo = _fallback_titulo_arte(fatos)
+
+    # 7. Linha de apoio: máx 12 palavras
+    if linha and len(linha.split()) > 12:
+        alertas.append(f"linha_apoio longa ({len(linha.split())} palavras), truncada")
+        linha = " ".join(linha.split()[:12])
+
+    # 8. Badge: máx 2 palavras
+    if badge and len(badge.split()) > 2:
+        alertas.append(f"badge longo ('{badge}'), truncado")
+        badge = " ".join(badge.split()[:2])
+    if not badge:
+        badge = fatos.get("categoria_editorial", "CULTURA").upper()
+
+    return {**arte, "titulo_principal": titulo, "linha_apoio": linha, "badge": badge}, alertas

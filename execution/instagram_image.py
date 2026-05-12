@@ -42,20 +42,23 @@ LOGO_FLAT_PATH = str(PROJECT_DIR / "logos" / "Logo +blog roxo.png.png")
 
 BADGE_COLOR = "#C8E600"
 BADGE_TEXT_COLOR = "#1A1A1A"
-GRADIENT_COLOR = (255, 62, 181)  # #FF3EB5 — rosa da marca
+GRADIENT_TOP_COLOR    = (180, 0, 140)   # magenta escuro — início do gradiente
+GRADIENT_BOTTOM_COLOR = (60, 0, 80)     # roxo quase preto — fim
+GRADIENT_START_FRAC   = 0.42            # gradiente começa em 42% da altura
 TITLE_COLOR = "white"
 
-BADGE_FONT_SIZE = 30
-TITLE_FONT_SIZE_MAX = 52
-TITLE_FONT_SIZE_MIN = 28
-SUBTITLE_FONT_SIZE = 28
-MARGIN = 44
+BADGE_FONT_SIZE      = 32
+TITLE_FONT_SIZE_MAX  = 96
+TITLE_FONT_SIZE_MIN  = 60
+SUBTITLE_FONT_SIZE   = 38
+MARGIN               = 70
 
 # Espaçamentos verticais (de baixo para cima)
-BOTTOM_MARGIN = 60       # margem inferior da canvas
-LOGO_HEIGHT = 75         # altura do logo flat
-LOGO_GAP = 24            # gap entre logo e título
-BADGE_TITLE_GAP = 16     # gap entre badge e título
+BOTTOM_MARGIN   = 70
+LOGO_HEIGHT     = 80
+LOGO_GAP        = 28
+BADGE_TITLE_GAP = 18
+TITLE_SUB_GAP   = 14
 
 
 def _detect_subject_position(img: Image.Image) -> tuple[str, str]:
@@ -148,19 +151,33 @@ def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
 
 
 def _draw_gradient(img: Image.Image) -> Image.Image:
-    """Gradiente rosa nos 45% inferiores."""
+    """Gradiente magenta→roxo escuro nos ~58% inferiores."""
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     w, h = img.size
-    start_y = int(h * 0.55)
+    start_y = int(h * GRADIENT_START_FRAC)
     gradient_h = h - start_y
-    r, g, b = GRADIENT_COLOR
+    r1, g1, b1 = GRADIENT_TOP_COLOR
+    r2, g2, b2 = GRADIENT_BOTTOM_COLOR
     for y in range(gradient_h):
-        alpha = int((y / gradient_h) * 204)
+        t = y / gradient_h
+        r = int(r1 + (r2 - r1) * t)
+        g = int(g1 + (g2 - g1) * t)
+        b = int(b1 + (b2 - b1) * t)
+        alpha = int(30 + t * 210)   # 30 → 240
         draw.line([(0, start_y + y), (w, start_y + y)], fill=(r, g, b, alpha))
     base = img.convert("RGBA")
-    composited = Image.alpha_composite(base, overlay)
-    return composited.convert("RGB")
+    return Image.alpha_composite(base, overlay).convert("RGB")
+
+
+def _darken_if_bright(img: Image.Image, threshold: int = 175) -> Image.Image:
+    """Escurece levemente fotos muito claras para garantir contraste com o texto."""
+    from PIL import ImageEnhance, ImageStat
+    stat = ImageStat.Stat(img.convert("RGB"))
+    mean_brightness = sum(stat.mean[:3]) / 3
+    if mean_brightness > threshold:
+        return ImageEnhance.Brightness(img).enhance(0.78)
+    return img
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
@@ -283,7 +300,8 @@ def generate_ig_image(
     with Image.open(cover_path) as raw:
         img = _smart_crop(raw.convert("RGB"), IG_W, IG_H)
 
-    # 2. Gradiente rosa
+    # 2. Escurece se foto muito clara, depois aplica gradiente
+    img = _darken_if_bright(img)
     img = _draw_gradient(img)
 
     # 3. Logo flat centralizado na base
@@ -293,12 +311,12 @@ def generate_ig_image(
     badge_font = _load_font(BADGE_FONT_SIZE)
     subtitle_font = _load_font(SUBTITLE_FONT_SIZE)
     title_font, wrapped_lines = _fit_title_font(title, IG_W - MARGIN * 2)
-    line_height = title_font.size + 10
+    line_height = int(title_font.size * 1.15)
     title_block_h = len(wrapped_lines) * line_height
 
     # Linha de apoio (subtitle): quebra em até 2 linhas
     subtitle_lines = _wrap_text(subtitle, subtitle_font, IG_W - MARGIN * 2)[:2] if subtitle else []
-    subtitle_line_h = SUBTITLE_FONT_SIZE + 8
+    subtitle_line_h = int(SUBTITLE_FONT_SIZE * 1.2)
     subtitle_block_h = len(subtitle_lines) * subtitle_line_h + (10 if subtitle_lines else 0)
 
     badge_sample = badge_font.getbbox("A")
@@ -316,7 +334,7 @@ def generate_ig_image(
         y += line_height
 
     if subtitle_lines:
-        y += 10  # pequeno gap entre título e subtitle
+        y += TITLE_SUB_GAP
         for line in subtitle_lines:
             draw.text((MARGIN, y), line, fill="white", font=subtitle_font)
             y += subtitle_line_h

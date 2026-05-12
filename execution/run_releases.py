@@ -107,6 +107,17 @@ def _run_json(args: list[str]) -> dict | list | None:
         return None
 
 
+def _imagem_adequada_para_arte(image_path: str) -> bool:
+    """Verifica resolução mínima sem LLM. Rejeita imagens pequenas demais."""
+    try:
+        from PIL import Image as _PILImage
+        with _PILImage.open(image_path) as img:
+            w, h = img.size
+            return w >= 800 and h >= 600
+    except Exception:
+        return False
+
+
 def _imagem_relevante(image_path: str, titulo: str) -> bool:
     """
     Usa Gemini Vision para verificar se a imagem é relevante ao título do post.
@@ -209,6 +220,9 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | Non
             cpath = candidate.get("path")
             if not cpath:
                 continue
+            if not _imagem_adequada_para_arte(cpath):
+                print(f"[run_releases] Foto baixa resolução, pulando: {Path(cpath).name}", file=sys.stderr)
+                continue
             if titulo and not _imagem_relevante(cpath, titulo):
                 print(f"[run_releases] Foto do email rejeitada (vision): {Path(cpath).name}", file=sys.stderr)
                 continue
@@ -249,7 +263,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     """Processa um email pelo pipeline completo. Retorna dict com resultado."""
     from editorial import (
         extrair_fatos, avaliar_relevancia, gerar_conteudo,
-        gerar_legenda, validar_fatos, resumo_telegram,
+        gerar_legenda, validar_fatos, resumo_telegram, validar_arte,
     )
 
     email_id = email.get("id", "?")
@@ -311,6 +325,13 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
 
     print(f"[run_releases]   Título: {titulo}", file=sys.stderr)
 
+    # Valida e corrige texto da arte antes de renderizar
+    arte_raw = post.get("texto_arte", {})
+    arte_validada, alertas_arte = validar_arte(arte_raw, fatos, subject)
+    if alertas_arte:
+        print(f"[run_releases]   Arte: {len(alertas_arte)} alerta(s): {alertas_arte}", file=sys.stderr)
+    post["texto_arte"] = arte_validada
+
     if dry_run:
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}
 
@@ -357,7 +378,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
 
     # 6. Legenda Instagram (sem créditos — exclusivos do WP)
     print(f"[run_releases]   4/6 Gerando legenda IG...", file=sys.stderr)
-    legendas = gerar_legenda(fatos, post.get("resumo_telegram", ""))
+    legendas = gerar_legenda(fatos, post.get("resumo_telegram", ""), arte_instagram=post.get("texto_arte"))
     legenda_curta = legendas.get("legenda_curta", "")
     legenda_longa = legendas.get("legenda_contexto", "")
     hashtags = legendas.get("hashtags", [])
