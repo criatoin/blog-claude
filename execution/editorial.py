@@ -156,17 +156,195 @@ Release original (primeiros 3000 chars):
         return _FALLBACK
 
 
-def gerar_conteudo(release_text: str, fatos: dict, avaliacao: dict, sender: str = "") -> dict:
+def extract_editorial_hierarchy(release_text: str, fatos: dict) -> dict:
+    """
+    Classifica informações do release em hierarquia editorial.
+    Define foco_principal, serviço, atividades passadas e ângulo para arte/legenda.
+    """
+    from llm_call import llm_call_json
+
+    _FALLBACK = {
+        "foco_principal": fatos.get("resumo_factual", ""),
+        "servico_principal": {
+            "evento": fatos.get("projeto", ""),
+            "cidade": fatos.get("cidade", ""),
+            "local": fatos.get("local", ""),
+            "endereco": fatos.get("endereco", ""),
+            "datas": [fatos.get("data", "")] if fatos.get("data") else [],
+            "horarios": [fatos.get("horario", "")] if fatos.get("horario") else [],
+            "entrada": "gratuita" if fatos.get("gratuito") else fatos.get("valor", ""),
+            "atividade": "",
+            "publico": fatos.get("publico_alvo", ""),
+        },
+        "eventos_futuros_ou_ativos": [],
+        "contexto_secundario": [],
+        "atividades_passadas": [],
+        "nao_usar_como_foco": [],
+        "angulo_instagram_recomendado": fatos.get("resumo_factual", ""),
+        "angulo_arte_recomendado": fatos.get("resumo_factual", ""),
+        "motivo_da_priorizacao": "extração automática de fallback",
+    }
+
+    system = """Você é editor do +blog.
+
+Sua função é organizar a hierarquia editorial de um release para definir o foco correto da arte e da legenda de Instagram.
+
+Nem todo fato do release tem o mesmo peso.
+
+Priorize:
+- o assunto principal do título;
+- o serviço principal;
+- eventos futuros ou ainda úteis para o público;
+- informações com data, horário, local e entrada;
+- o que o público ainda pode fazer, acompanhar ou participar.
+
+Rebaixe:
+- atividades já realizadas;
+- contexto institucional;
+- histórico do projeto;
+- informações de apoio;
+- detalhes que não representam o foco principal.
+
+Use somente informações do release e dos fatos extraídos.
+
+Regras:
+- Se uma atividade já aconteceu, coloque em atividades_passadas.
+- Não use atividade passada como foco de Instagram.
+- Se o release tem seção "Serviço", ela deve ter peso alto.
+- O foco da arte e da legenda deve vir do serviço principal.
+- O título da arte deve refletir o que o público ainda pode acompanhar ou saber.
+- Não escolha como foco uma frase bonita se ela não representa o serviço principal.
+- Não transforme contexto secundário em chamada principal.
+
+Responda apenas em JSON válido:
+{
+  "foco_principal": "",
+  "servico_principal": {
+    "evento": "",
+    "cidade": "",
+    "local": "",
+    "endereco": "",
+    "datas": [],
+    "horarios": [],
+    "entrada": "",
+    "atividade": "",
+    "publico": ""
+  },
+  "eventos_futuros_ou_ativos": [],
+  "contexto_secundario": [],
+  "atividades_passadas": [],
+  "nao_usar_como_foco": [],
+  "angulo_instagram_recomendado": "",
+  "angulo_arte_recomendado": "",
+  "motivo_da_priorizacao": ""
+}"""
+
+    fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
+    user = f"Fatos extraídos:\n{fatos_str}\n\nRelease:\n{release_text[:5000]}"
+
+    try:
+        result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
+        if isinstance(result, dict) and result.get("foco_principal"):
+            return {**_FALLBACK, **result}
+        return _FALLBACK
+    except Exception as e:
+        print(f"[editorial] extract_editorial_hierarchy falhou: {e}", file=sys.stderr)
+        return _FALLBACK
+
+
+def validate_instagram_output_against_hierarchy(
+    arte: dict,
+    legenda: dict,
+    hierarchy: dict,
+    fatos: dict,
+) -> list[str]:
+    """
+    Verifica se arte e legenda respeitam a hierarquia editorial.
+    Retorna lista de erros — vazia significa que está OK.
+    """
+    erros = []
+    nao_usar = [t.lower() for t in hierarchy.get("nao_usar_como_foco", [])]
+    passadas = [t.lower() for t in hierarchy.get("atividades_passadas", [])]
+
+    titulo = arte.get("titulo_principal", "").lower()
+    linha = arte.get("linha_apoio", "").lower()
+    curta = legenda.get("legenda_curta", "").lower()
+    contexto = legenda.get("legenda_contexto", "").lower()
+    legenda_full = curta + "\n" + contexto
+
+    # 1. Arte ou legenda usa termo da lista nao_usar_como_foco?
+    for termo in nao_usar:
+        if len(termo) > 4:  # ignora palavras muito curtas
+            if termo in titulo or termo in linha:
+                erros.append(f"arte usa '{termo}' — listado em nao_usar_como_foco")
+            if termo in legenda_full:
+                erros.append(f"legenda usa '{termo}' — listado em nao_usar_como_foco")
+
+    # 2. Legenda abre com atividade passada?
+    if passadas:
+        primeiros = curta[:200].lower()
+        for passada in passadas:
+            if len(passada) > 8 and passada[:30] in primeiros:
+                erros.append(f"legenda abre com atividade passada: '{passada[:50]}'")
+
+    # 3. Hashtag indevida
+    if "#" in arte.get("titulo_principal", "") or "#" in arte.get("linha_apoio", ""):
+        erros.append("arte contém hashtag")
+    if "#" in legenda_full:
+        erros.append("legenda contém hashtag")
+
+    # 4. Gratuidade não confirmada
+    if fatos.get("gratuito") is not True:
+        for campo in (titulo, linha, curta[:300]):
+            for termo in ("gratuito", "grátis", "entrada franca"):
+                if termo in campo:
+                    erros.append(f"usa '{termo}' sem gratuidade confirmada")
+                    break
+
+    return erros
+
+
+def gerar_conteudo(
+    release_text: str,
+    fatos: dict,
+    avaliacao: dict,
+    sender: str = "",
+    hierarchy: dict | None = None,
+) -> dict:
     """
     Gera o conteúdo editorial completo do post.
     sender: usado como fallback para creditos_wordpress.texto.
+    hierarchy: hierarquia editorial para guiar arte e foco.
     """
     from llm_call import llm_call_json
 
     angulo = avaliacao.get("angulo_recomendado", "")
     angulo_instrucao = f"ÂNGULO EDITORIAL: {angulo}\n\n" if angulo else ""
 
-    system = f"""{angulo_instrucao}{_VOZ_EDITORIAL}
+    # Injeta contexto de hierarquia no prompt se disponível
+    hierarchy_instrucao = ""
+    if hierarchy and hierarchy.get("foco_principal"):
+        nao_usar_str = "\n".join(f"  - {t}" for t in hierarchy.get("nao_usar_como_foco", []))
+        passadas_str = "\n".join(f"  - {t}" for t in hierarchy.get("atividades_passadas", []))
+        hierarchy_instrucao = f"""
+════════════════════════════════
+HIERARQUIA EDITORIAL (OBRIGATÓRIO)
+════════════════════════════════
+FOCO PRINCIPAL: {hierarchy.get("foco_principal", "")}
+ÂNGULO PARA ARTE: {hierarchy.get("angulo_arte_recomendado", "")}
+ÂNGULO PARA INSTAGRAM: {hierarchy.get("angulo_instagram_recomendado", "")}
+
+NÃO USAR COMO FOCO (proibido virar título ou abertura):
+{nao_usar_str or "  (nenhum)"}
+
+ATIVIDADES JÁ REALIZADAS (só como contexto secundário, nunca como foco):
+{passadas_str or "  (nenhuma)"}
+
+A arte e a legenda DEVEM refletir o foco principal acima.
+A arte e a legenda NÃO PODEM usar qualquer item da lista "NÃO USAR COMO FOCO".
+"""
+
+    system = f"""{angulo_instrucao}{hierarchy_instrucao}{_VOZ_EDITORIAL}
 
 ════════════════════════════════
 HTML PURO — PROIBIDO USAR MARKDOWN
@@ -217,6 +395,10 @@ Retorne APENAS um objeto JSON válido (sem markdown):
 ════════════════════════════════
 REGRAS PARA texto_arte
 ════════════════════════════════
+- A arte deve refletir o FOCO PRINCIPAL definido na hierarquia editorial acima.
+- Não use atividades passadas como título da arte.
+- Não use contexto secundário como chamada principal.
+- Não use nenhum termo listado em "NÃO USAR COMO FOCO".
 - badge: 1 ou 2 palavras em maiúsculas (ex: "LITERATURA", "MÚSICA", "CULTURA")
 - titulo_principal: máx 6 palavras, SEM ponto final, SEM hashtags (#)
 - titulo_principal NÃO pode ser igual ao titulo_site
@@ -226,8 +408,8 @@ REGRAS PARA texto_arte
 - só usar "gratuito" ou "grátis" se gratuito=true nos fatos extraídos
 - só mencionar cidade, data ou local se estiverem nos fatos extraídos
 - titulo_principal deve parecer manchete de post social, não frase de release:
-    CERTO: "Histórias que encantam", "Cultura preta na Estação", "Americana recebe Sarau Ameriafro"
-    ERRADO: "Evento acontece em Santa Bárbara", "Projeto leva magia da leitura para crianças"
+    CERTO: "Histórias no CEU", "Leitura ganha asas", "Cultura preta na Estação"
+    ERRADO: "Projeto leva magia da leitura para crianças", "Cantigas que unem gerações"
 
 ════════════════════════════════
 REGRAS DE CRÉDITO (campo creditos_wordpress)
@@ -268,13 +450,32 @@ Release original:
         return _FALLBACK
 
 
-def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) -> dict:
+def gerar_legenda(
+    fatos: dict,
+    resumo: str,
+    arte_instagram: dict | None = None,
+    hierarchy: dict | None = None,
+) -> dict:
     """
     Gera legenda para Instagram com 4-6 blocos, narrativa editorial, sem hashtags.
     arte_instagram: dict com titulo_principal/linha_apoio/badge — evita repetir texto da arte.
+    hierarchy: hierarquia editorial para guiar foco e evitar termos proibidos.
     Sem créditos — créditos são exclusivos do HTML WordPress.
     """
     from llm_call import llm_call_json
+
+    _FALLBACK_servico = hierarchy.get("servico_principal", {}) if hierarchy else {}
+    _fallback_contexto = ""
+    if _FALLBACK_servico.get("evento"):
+        datas_str = " e ".join(_FALLBACK_servico.get("datas", []))
+        horarios_str = " e ".join(_FALLBACK_servico.get("horarios", []))
+        _fallback_contexto = (
+            f"{_FALLBACK_servico.get('evento', '')} realiza sessões em {_FALLBACK_servico.get('cidade', '')}.\n\n"
+            + (f"A programação acontece nos dias {datas_str}" if datas_str else "")
+            + (f", às {horarios_str}" if horarios_str else "")
+            + (f", no {_FALLBACK_servico.get('local', '')}" if _FALLBACK_servico.get("local") else "")
+            + ".\n\nNo +blog tem os detalhes para você se organizar."
+        )
 
     _FALLBACK = {
         "legenda_curta": (
@@ -282,7 +483,7 @@ def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) 
             "A gente reuniu no +blog as informações confirmadas para você entender melhor o que vai rolar.\n\n"
             "Vale salvar e mandar para quem curte esse tipo de programação na região."
         ),
-        "legenda_contexto": "",
+        "legenda_contexto": _fallback_contexto,
         "cta_sugerido": "",
     }
 
@@ -296,6 +497,27 @@ def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) 
         )
 
     fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
+
+    # Bloco de hierarquia editorial para o prompt
+    hierarchy_str = ""
+    if hierarchy and hierarchy.get("foco_principal"):
+        nao_usar_str = "\n".join(f"  - {t}" for t in hierarchy.get("nao_usar_como_foco", []))
+        passadas_str = "\n".join(f"  - {t}" for t in hierarchy.get("atividades_passadas", []))
+        hierarchy_str = f"""
+HIERARQUIA EDITORIAL — SIGA OBRIGATORIAMENTE:
+Foco principal: {hierarchy.get("foco_principal", "")}
+Ângulo recomendado: {hierarchy.get("angulo_instagram_recomendado", "")}
+
+NÃO USAR COMO FOCO (proibido virar abertura ou tema principal):
+{nao_usar_str or "  (nenhum)"}
+
+ATIVIDADES JÁ REALIZADAS (só como contexto secundário, nunca como abertura):
+{passadas_str or "  (nenhuma)"}
+
+A legenda DEVE abrir com o foco principal.
+A legenda NÃO PODE abrir com atividade passada.
+A legenda NÃO PODE transformar contexto secundário em tema principal.
+"""
 
     system = f"""{_VOZ_EDITORIAL}
 
@@ -311,6 +533,7 @@ Ela não deve parecer resumo frio de matéria.
 Ela não deve ser institucional.
 Ela não deve repetir mecanicamente o texto da arte.
 Ela NÃO deve ter hashtags — nenhuma sequer.
+{hierarchy_str}
 
 ESTRUTURA OBRIGATÓRIA — 4 a 6 blocos curtos:
 
@@ -670,39 +893,60 @@ def gerar_arte_com_validacao(
     avaliacao: dict,
     sender: str = "",
     release_titulo: str = "",
+    hierarchy: dict | None = None,
 ) -> dict:
     """
     Gera conteúdo editorial com loop de validação para texto_arte.
     Tenta até 2 vezes: na segunda, passa os erros como feedback explícito ao LLM.
     Se ambas falharem, aplica fallback determinístico.
+    hierarchy: hierarquia editorial para guiar o foco da arte.
     Retorna o dict completo de gerar_conteudo com texto_arte validado.
     """
     from llm_call import llm_call_json
 
-    # Tentativa 1: geração normal
-    post = gerar_conteudo(release_text, fatos, avaliacao, sender=sender)
+    # Tentativa 1: geração com hierarquia
+    post = gerar_conteudo(release_text, fatos, avaliacao, sender=sender, hierarchy=hierarchy)
     arte = post.get("texto_arte", {})
     erros = _erros_criticos_arte(arte, fatos, release_titulo)
+
+    # Adiciona verificação de hierarquia aos erros críticos
+    if hierarchy:
+        nao_usar = [t.lower() for t in hierarchy.get("nao_usar_como_foco", [])]
+        titulo_lower = arte.get("titulo_principal", "").lower()
+        for termo in nao_usar:
+            if len(termo) > 4 and termo in titulo_lower:
+                erros.append(f"titulo_principal usa '{termo}' — proibido pela hierarquia editorial")
+                break
 
     if erros:
         print(f"[editorial] texto_arte com {len(erros)} erro(s) crítico(s): {erros}", file=sys.stderr)
         print(f"[editorial] Tentativa 2 com feedback explícito...", file=sys.stderr)
 
-        # Tentativa 2: inclui feedback dos erros no prompt
+        # Tentativa 2: inclui feedback dos erros e hierarquia no prompt
         angulo = avaliacao.get("angulo_recomendado", "")
         angulo_instrucao = f"ÂNGULO EDITORIAL: {angulo}\n\n" if angulo else ""
         feedback = "\n".join(f"- {e}" for e in erros)
 
-        system_retry = f"""{angulo_instrucao}{_VOZ_EDITORIAL}
+        hierarchy_retry_str = ""
+        if hierarchy and hierarchy.get("foco_principal"):
+            nao_usar_str = "\n".join(f"  - {t}" for t in hierarchy.get("nao_usar_como_foco", []))
+            hierarchy_retry_str = f"""
+FOCO PRINCIPAL OBRIGATÓRIO: {hierarchy.get("foco_principal", "")}
+ÂNGULO PARA ARTE: {hierarchy.get("angulo_arte_recomendado", "")}
+NÃO USAR COMO FOCO: {nao_usar_str or "(nenhum)"}
+"""
 
+        system_retry = f"""{angulo_instrucao}{_VOZ_EDITORIAL}
+{hierarchy_retry_str}
 Na tentativa anterior, o campo texto_arte falhou com estes erros:
 {feedback}
 
-Corrija APENAS o campo texto_arte. Os outros campos podem ser os mesmos.
+Corrija APENAS o campo texto_arte usando o foco principal acima como base.
 
 Regras do texto_arte:
 - badge: 1 ou 2 palavras em maiúsculas, sem hashtag
 - titulo_principal: máx 6 palavras, sem ponto final, sem hashtag, sem palavras proibidas
+- titulo_principal deve refletir o foco principal — não use atividades passadas nem itens proibidos
 - linha_apoio: máx 12 palavras, sem hashtag
 - NUNCA usar hashtags em nenhum campo
 - só mencionar gratuidade se gratuito=true nos fatos

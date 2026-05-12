@@ -262,8 +262,10 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | Non
 def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
     """Processa um email pelo pipeline completo. Retorna dict com resultado."""
     from editorial import (
-        extrair_fatos, avaliar_relevancia, gerar_arte_com_validacao,
-        gerar_legenda, validar_fatos, resumo_telegram,
+        extrair_fatos, avaliar_relevancia, extract_editorial_hierarchy,
+        gerar_arte_com_validacao, gerar_legenda,
+        validate_instagram_output_against_hierarchy,
+        validar_fatos, resumo_telegram,
     )
 
     email_id = email.get("id", "?")
@@ -287,11 +289,11 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     print(f"\n[run_releases] → Processando: {subject[:60]}", file=sys.stderr)
 
     # 1. Extrai fatos
-    print(f"[run_releases]   1/6 Extraindo fatos...", file=sys.stderr)
+    print(f"[run_releases]   1/7 Extraindo fatos...", file=sys.stderr)
     fatos = extrair_fatos(body_text)
 
     # 2. Avalia relevância
-    print(f"[run_releases]   2/6 Avaliando relevância...", file=sys.stderr)
+    print(f"[run_releases]   2/7 Avaliando relevância...", file=sys.stderr)
     avaliacao = avaliar_relevancia(body_text, fatos)
     relevante = avaliacao.get("relevante", False)
 
@@ -309,9 +311,19 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
             ])
         return {"email_id": email_id, "relevante": False, "motivo": motivo}
 
-    # 3. Gera conteúdo editorial com validação e retentativa automática
-    print(f"[run_releases]   3/6 Gerando conteúdo...", file=sys.stderr)
-    post = gerar_arte_com_validacao(body_text, fatos, avaliacao, sender=sender, release_titulo=subject)
+    # 3. Hierarquia editorial — define foco antes de gerar arte e legenda
+    print(f"[run_releases]   3/7 Definindo hierarquia editorial...", file=sys.stderr)
+    hierarchy = extract_editorial_hierarchy(body_text, fatos)
+    print(f"[run_releases]   Foco: {hierarchy.get('foco_principal', '')[:80]}", file=sys.stderr)
+    if hierarchy.get("atividades_passadas"):
+        print(f"[run_releases]   Passadas (excluir do foco): {hierarchy['atividades_passadas']}", file=sys.stderr)
+
+    # 4. Gera conteúdo editorial com validação e retentativa automática
+    print(f"[run_releases]   4/7 Gerando conteúdo...", file=sys.stderr)
+    post = gerar_arte_com_validacao(
+        body_text, fatos, avaliacao, sender=sender,
+        release_titulo=subject, hierarchy=hierarchy,
+    )
 
     titulo = post.get("titulo_site") or subject[:65]
     slug = post.get("slug") or "post-sem-slug"
@@ -369,23 +381,34 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         if upload_result:
             ig_url = upload_result.get("url", "")
 
-    # 6. Legenda Instagram (sem créditos — exclusivos do WP)
-    print(f"[run_releases]   4/6 Gerando legenda IG...", file=sys.stderr)
-    legendas = gerar_legenda(fatos, post.get("resumo_telegram", ""), arte_instagram=post.get("texto_arte"))
+    # 5. Legenda Instagram (sem créditos — exclusivos do WP)
+    print(f"[run_releases]   5/7 Gerando legenda IG...", file=sys.stderr)
+    legendas = gerar_legenda(
+        fatos, post.get("resumo_telegram", ""),
+        arte_instagram=post.get("texto_arte"),
+        hierarchy=hierarchy,
+    )
     legenda_curta = legendas.get("legenda_curta", "")
     legenda_longa = legendas.get("legenda_contexto", "")
     hashtags = legendas.get("hashtags", [])
 
-    # 7. Validação factual
-    print(f"[run_releases]   5/6 Validando fatos...", file=sys.stderr)
+    # Valida saída de arte e legenda contra a hierarquia editorial
+    erros_hierarquia = validate_instagram_output_against_hierarchy(
+        post.get("texto_arte", {}), legendas, hierarchy, fatos
+    )
+    if erros_hierarquia:
+        print(f"[run_releases]   Aviso hierarquia: {erros_hierarquia}", file=sys.stderr)
+
+    # 6. Validação factual
+    print(f"[run_releases]   6/7 Validando fatos...", file=sys.stderr)
     post_para_validar = {**post, "legenda_curta": legenda_curta}
     validacao = validar_fatos(body_text, fatos, post_para_validar)
     risco = validacao.get("risco_alucinacao", "baixo")
     if risco != "baixo":
         print(f"[run_releases]   Risco de alucinacao: {risco}", file=sys.stderr)
 
-    # 8. Resumo para Telegram
-    print(f"[run_releases]   6/6 Montando resumo Telegram...", file=sys.stderr)
+    # 7. Resumo para Telegram
+    print(f"[run_releases]   7/7 Montando resumo Telegram...", file=sys.stderr)
     card_meta = resumo_telegram(post, validacao, avaliacao)
 
     # 9. HTML com bloco de créditos ao final (exclusivo WordPress)
