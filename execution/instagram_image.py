@@ -162,24 +162,37 @@ def generate_ig_image(
     d.text((TX + PW, TY + PH), cat_up, font=ft, fill=(0, 0, 0))
     tag_bottom = rect[3]
 
-    # Título — grupos de 2 palavras por linha, tamanho máximo que cabe em 940px
-    words  = title.split()
-    linhas = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
+    # Título — quebra semântica por contagem de palavras + tamanho adaptativo
+    words = title.split()
+    n = len(words)
 
-    tamanho = 105
+    if n <= 2:
+        linhas = [title]
+        tamanho_inicial = 72
+    elif n == 3:
+        linhas = [" ".join(words[:2]), words[2]]
+        tamanho_inicial = 82
+    elif n == 4:
+        linhas = [" ".join(words[:2]), " ".join(words[2:])]
+        tamanho_inicial = 82
+    elif n == 5:
+        linhas = [" ".join(words[:3]), " ".join(words[3:])]
+        tamanho_inicial = 88
+    else:
+        linhas = [" ".join(words[:2]), " ".join(words[2:4]), " ".join(words[4:])]
+        tamanho_inicial = 92
+
+    tamanho = tamanho_inicial
     fonte_ok = None
     while tamanho >= 56:
         fti = _load_font(tamanho, "black")
-        linha_mais_longa = max(d.textlength(l, font=fti) for l in linhas)
-        if linha_mais_longa <= 940:
+        if max(d.textlength(l, font=fti) for l in linhas) <= 940:
             fonte_ok = fti
             break
         tamanho -= 2
 
     if fonte_ok is None:
-        # Fallback: 1 palavra por linha com fonte mínima
         fonte_ok = _load_font(56, "black")
-        linhas = words
 
     ty = tag_bottom + 22
     for linha in linhas:
