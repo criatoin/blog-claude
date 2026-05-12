@@ -1,14 +1,17 @@
 """
 instagram_image.py — Gera arte para Instagram via composição Pillow.
 
+Template global determinístico — estilo Ameriafro.
+
 Formato: 1080×1350px (4:5), WebP, <1MB
 
 Camadas (de baixo para cima):
-  1. Foto de capa — smart crop
-  2. Gradiente rosa — overlay nos 45% inferiores (transparente → #FF3EB5 ~80%)
-  3. Logo flat centralizado na base
-  4. Título — texto branco bold, máx 3 linhas (fonte ajusta automaticamente)
-  5. Badge categoria — retângulo arredondado #C8E600, texto preto bold caps
+  1. Foto full-bleed — smart crop preservando sujeitos principais
+  2. Gradiente integrado — overlay longo e suave (transparente → magenta → roxo escuro)
+  3. Badge categoria — amarelo/limão, texto preto bold, canto arredondado
+  4. Título — texto branco bold, dominante, máx 3 linhas
+  5. Linha de apoio — branca, menor que título, máx 2 linhas
+  6. Logo rosa oficial centralizado no rodapé
 
 Uso:
     python execution/instagram_image.py \
@@ -16,6 +19,7 @@ Uso:
         --slug meu-post \
         --title "Título do evento" \
         --category "Diversão" \
+        [--art-subtitle "Linha de apoio curta"] \
         [--output-dir .tmp]
 
 Saída JSON:
@@ -32,146 +36,133 @@ from PIL import Image, ImageDraw, ImageFont
 
 load_dotenv()
 
+# ── Dimensões e limites ────────────────────────────────────────────────────────
 IG_W, IG_H = 1080, 1350
 MAX_SIZE_BYTES = 1 * 1024 * 1024
 QUALITY_STEPS = [85, 75, 65, 55]
 
+# ── Caminhos de assets ─────────────────────────────────────────────────────────
 PROJECT_DIR = Path(__file__).parent.parent
 FONT_PATH = str(PROJECT_DIR / "assets" / "fonts" / "Poppins-Bold.ttf")
-LOGO_FLAT_PATH = str(PROJECT_DIR / "assets" / "logo" / "Logo +blog rosa.png")
+LOGO_PATH = str(PROJECT_DIR / "assets" / "logo" / "Logo +blog rosa.png")
 
-BADGE_COLOR = "#C8E600"
+# ── Paleta ─────────────────────────────────────────────────────────────────────
+BADGE_COLOR      = "#C8E600"
 BADGE_TEXT_COLOR = "#1A1A1A"
-GRADIENT_TOP_COLOR    = (180, 0, 140)   # magenta escuro — início do gradiente
-GRADIENT_BOTTOM_COLOR = (60, 0, 80)     # roxo quase preto — fim
-GRADIENT_START_FRAC   = 0.42            # gradiente começa em 42% da altura
-TITLE_COLOR = "white"
+TITLE_COLOR      = "white"
 
-BADGE_FONT_SIZE      = 32
-TITLE_FONT_SIZE_MAX  = 96
-TITLE_FONT_SIZE_MIN  = 60
-SUBTITLE_FONT_SIZE   = 38
-MARGIN               = 70
+# Gradiente: dois tons que se misturam sobre a foto
+GRAD_COLOR_MID    = (160, 0, 120)   # magenta médio — entrada do gradiente
+GRAD_COLOR_BOTTOM = (45,  0,  65)   # roxo muito escuro — rodapé
 
-# Espaçamentos verticais (de baixo para cima)
-BOTTOM_MARGIN   = 50
-LOGO_HEIGHT     = 80
-LOGO_GAP        = 48   # respiro entre logo e título
-BADGE_TITLE_GAP = 18
-TITLE_SUB_GAP   = 14
+# ── Tipografia ─────────────────────────────────────────────────────────────────
+BADGE_FONT_SIZE     = 32
+TITLE_FONT_SIZE_MAX = 96
+TITLE_FONT_SIZE_MIN = 60
+SUPPORT_FONT_SIZE   = 38
+
+# ── Layout global (template Ameriafro) ────────────────────────────────────────
+# Todos os valores em pixels absolutos ou fração de IG_H.
+TEXT_MARGIN          = 70   # margem esquerda/direita do bloco de texto
+
+# Gradiente
+GRAD_START_FRAC = 0.44      # começa em 44% da altura — transição bem cima
+GRAD_FEATHER    = 0.12      # os primeiros 12% do gradiente ficam quase invisíveis
+
+# Posição do badge (âncora superior do bloco de texto)
+BADGE_TOP_Y = int(IG_H * 0.46)   # ~621px — início da zona de texto
+
+# Espaçamentos internos do bloco
+BADGE_TO_TITLE_GAP  = 38    # do bottom do badge até o top do título
+TITLE_LINE_SPACING  = 1.15  # multiplicador de line-height sobre o tamanho da fonte
+TITLE_TO_SUPPORT_GAP = 28   # do bottom do título até o top da linha de apoio
+SUPPORT_LINE_SPACING = 1.20
+
+# Logo
+LOGO_HEIGHT         = 80    # altura real do conteúdo do logo (após bbox crop)
+LOGO_BOTTOM_MARGIN  = 70    # margem entre bottom do logo e bottom do canvas
+LOGO_Y = IG_H - LOGO_BOTTOM_MARGIN - LOGO_HEIGHT   # ~1200px
+
+# Segurança: distância mínima entre bottom da linha de apoio e top do logo
+MIN_SUPPORT_TO_LOGO_GAP = 70
+
+# Se o bloco estoura para cima do gradiente, reduz fonte antes de comprimir layout
+OVERFLOW_SHRINK_STEP = 4    # reduz em 4px por vez até TITLE_FONT_SIZE_MIN
 
 
-def _build_photo_background(img: Image.Image, w: int, h: int) -> tuple[Image.Image, int]:
+def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
     """
-    Constrói o fundo fotográfico para o canvas.
-    Retorna (imagem_rgb, gradient_start_y).
-
-    Estratégia por proporção da foto original:
-    - Vertical ou quadrada (ratio ≤ 1.1): fit-and-crop central conservador.
-      Gradiente começa em GRADIENT_START_FRAC do canvas.
-    - Horizontal (ratio > 1.1): layout híbrido.
-      Fundo borrado + foto principal posicionada preservando todos os sujeitos.
-      Gradiente começa no terço inferior da foto principal (dentro dela).
+    Redimensiona e corta a foto para preencher exatamente w×h pixels (full-bleed).
+    Preserva sujeitos: crop vertical em 35% do topo (não centralizado),
+    crop horizontal centralizado.
+    Funciona para qualquer proporção de foto — vertical, quadrada ou horizontal.
     """
-    from PIL import ImageFilter, ImageEnhance
     src_w, src_h = img.size
-    src_ratio = src_w / src_h
 
-    if src_ratio <= 1.1:
-        # Foto vertical/quadrada: crop central conservador
-        new_w = w
-        new_h = int(src_h * w / src_w)
-        if new_h < h:
-            new_h = h
-            new_w = int(src_w * h / src_h)
-        resized = img.resize((new_w, new_h), Image.LANCZOS)
-        left = (new_w - w) // 2
-        top  = max(0, int((new_h - h) * 0.35))
-        cropped = resized.crop((left, top, left + w, top + h))
-        gradient_start_y = int(h * GRADIENT_START_FRAC)
-        return cropped, gradient_start_y
+    # Escala pelo eixo que deixa a imagem menor (cover, não contain)
+    scale = max(w / src_w, h / src_h)
+    new_w = int(src_w * scale)
+    new_h = int(src_h * scale)
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
 
-    else:
-        # Foto horizontal: layout híbrido fundo borrado + foto principal
-        print(f"[instagram_image] Foto horizontal ({src_ratio:.2f}) — layout híbrido.", file=sys.stderr)
+    # Corte horizontal: centro
+    left = (new_w - w) // 2
+    # Corte vertical: levemente acima do centro — preserva rostos/sujeitos
+    top = max(0, int((new_h - h) * 0.35))
 
-        # Fundo: zoom + blur forte + escurecimento
-        scale_bg = max(w / src_w, h / src_h) * 1.05
-        bg_w, bg_h = int(src_w * scale_bg), int(src_h * scale_bg)
-        bg = img.resize((bg_w, bg_h), Image.LANCZOS)
-        bx, by = (bg_w - w) // 2, (bg_h - h) // 2
-        bg = bg.crop((bx, by, bx + w, by + h))
-        bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
-        bg = ImageEnhance.Brightness(bg).enhance(0.40)
-
-        # Foto principal: escala pela altura do canvas para eliminar qualquer gap roxo abaixo.
-        # Fotos mais largas que o canvas são centralizadas e cortadas lateralmente (crop).
-        scale_photo = h / src_h  # escala pela altura — garante ph_h == h
-        ph_w = int(src_w * scale_photo)
-        ph_h = h
-        photo_full = img.resize((ph_w, ph_h), Image.LANCZOS)
-
-        # Crop central se mais larga que o canvas
-        if ph_w > w:
-            crop_x = (ph_w - w) // 2
-            photo_full = photo_full.crop((crop_x, 0, crop_x + w, ph_h))
-            ph_w = w
-
-        photo = photo_full
-
-        # Aplica máscara de fade na borda inferior da foto para fundir com o fundo borrado
-        photo_rgba = photo.convert("RGBA")
-        fade_zone = int(ph_h * 0.40)  # os últimos 40% da foto dissolvem gradualmente
-        r_ch, g_ch, b_ch, a_ch = photo_rgba.split()
-        import PIL.Image as _PILImage
-        mask = _PILImage.new("L", (ph_w, ph_h), 255)
-        mask_draw = ImageDraw.Draw(mask)
-        for dy in range(fade_zone):
-            alpha_val = int(255 * (1 - dy / fade_zone))
-            mask_draw.line([(0, ph_h - fade_zone + dy), (ph_w, ph_h - fade_zone + dy)], fill=alpha_val)
-        a_ch = _PILImage.composite(a_ch, _PILImage.new("L", (ph_w, ph_h), 0), mask)
-        photo_rgba = _PILImage.merge("RGBA", (r_ch, g_ch, b_ch, a_ch))
-
-        # Cola cobrindo o canvas inteiro (py=0)
-        canvas = bg.convert("RGBA")
-        px = (w - ph_w) // 2
-        py = 0
-        canvas.paste(photo_rgba, (px, py), mask=photo_rgba)
-
-        # Gradiente começa onde o fade começa — sem gap entre foto e texto
-        gradient_start_y = ph_h - fade_zone
-
-        return canvas.convert("RGB"), gradient_start_y
+    return resized.crop((left, top, left + w, top + h))
 
 
-def _draw_gradient(img: Image.Image, start_y: int | None = None) -> Image.Image:
-    """Gradiente magenta→roxo escuro. start_y permite controle externo do ponto de início."""
+def _draw_integrated_gradient(img: Image.Image) -> Image.Image:
+    """
+    Gradiente integrado estilo Ameriafro:
+    - começa em GRAD_START_FRAC com alpha quase zero (feather)
+    - cresce suavemente de forma não-linear
+    - vai de magenta médio → roxo muito escuro no rodapé
+    - nunca forma faixa visível — parece parte da foto
+    """
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     w, h = img.size
-    if start_y is None:
-        start_y = int(h * GRADIENT_START_FRAC)
+
+    start_y    = int(h * GRAD_START_FRAC)
+    feather_h  = int((h - start_y) * GRAD_FEATHER)  # zona de feather inicial
     gradient_h = h - start_y
-    r1, g1, b1 = GRADIENT_TOP_COLOR
-    r2, g2, b2 = GRADIENT_BOTTOM_COLOR
+
+    r_mid, g_mid, b_mid       = GRAD_COLOR_MID
+    r_bot, g_bot, b_bot       = GRAD_COLOR_BOTTOM
+
     for y in range(gradient_h):
-        t = y / gradient_h
-        r = int(r1 + (r2 - r1) * t)
-        g = int(g1 + (g2 - g1) * t)
-        b = int(b1 + (b2 - b1) * t)
-        alpha = int(30 + t * 210)   # 30 → 240
+        t = y / gradient_h  # 0.0 → 1.0
+
+        # Cor: interpola de GRAD_COLOR_MID para GRAD_COLOR_BOTTOM
+        r = int(r_mid + (r_bot - r_mid) * t)
+        g = int(g_mid + (g_bot - g_mid) * t)
+        b = int(b_mid + (b_bot - b_mid) * t)
+
+        # Alpha: feather suave na entrada, curva quadrática de crescimento
+        if y < feather_h:
+            # Zona de feather: 0 → ~40, muito suave
+            raw_alpha = int(40 * (y / feather_h) ** 2)
+        else:
+            # Resto: cresce de 40 → 245 com curva levemente acelerada
+            t_rest = (y - feather_h) / (gradient_h - feather_h)
+            raw_alpha = int(40 + 205 * (t_rest ** 1.4))
+
+        alpha = min(245, raw_alpha)
         draw.line([(0, start_y + y), (w, start_y + y)], fill=(r, g, b, alpha))
+
     base = img.convert("RGBA")
     return Image.alpha_composite(base, overlay).convert("RGB")
 
 
-def _darken_if_bright(img: Image.Image, threshold: int = 175) -> Image.Image:
+def _darken_if_bright(img: Image.Image, threshold: int = 170) -> Image.Image:
     """Escurece levemente fotos muito claras para garantir contraste com o texto."""
     from PIL import ImageEnhance, ImageStat
     stat = ImageStat.Stat(img.convert("RGB"))
     mean_brightness = sum(stat.mean[:3]) / 3
     if mean_brightness > threshold:
-        return ImageEnhance.Brightness(img).enhance(0.78)
+        return ImageEnhance.Brightness(img).enhance(0.75)
     return img
 
 
@@ -182,66 +173,91 @@ def _load_font(size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-def _remove_white_bg(img: Image.Image) -> Image.Image:
-    """Converte fundo branco/quase-branco em transparente."""
-    img = img.convert("RGBA")
-    data = img.getdata()
+def _load_logo() -> Image.Image | None:
+    """Carrega logo, remove fundo branco, corta bbox vazia, retorna RGBA."""
+    try:
+        logo = Image.open(LOGO_PATH).convert("RGBA")
+    except Exception:
+        return None
+
+    # Remove fundo branco/quase-branco
+    data = logo.getdata()
     new_data = [
         (r, g, b, 0) if r > 230 and g > 230 and b > 230 else (r, g, b, a)
         for r, g, b, a in data
     ]
-    img.putdata(new_data)
-    return img
+    logo.putdata(new_data)
 
-
-def _paste_logo_centered(img: Image.Image) -> tuple[Image.Image, int]:
-    """
-    Cola logo flat centralizado horizontalmente acima da margem inferior.
-    Recorta o espaço em branco do PNG antes de redimensionar para que
-    LOGO_HEIGHT corresponda à altura real do conteúdo do logo.
-    Retorna (imagem, y_topo_do_logo) para calcular posição do texto acima.
-    """
-    logo_top_y = IG_H - BOTTOM_MARGIN - LOGO_HEIGHT
-    try:
-        logo = Image.open(LOGO_FLAT_PATH).convert("RGBA")
-    except Exception:
-        return img, logo_top_y
-
-    logo = _remove_white_bg(logo)
-
-    # Recorta o espaço vazio ao redor do conteúdo real do logo
+    # Corta espaço vazio
     bbox = logo.getbbox()
     if bbox:
         logo = logo.crop(bbox)
 
-    # Redimensiona pela altura mantendo proporção
-    orig_w, orig_h = logo.size
-    new_w = int(orig_w * LOGO_HEIGHT / orig_h)
-    logo = logo.resize((new_w, LOGO_HEIGHT), Image.LANCZOS)
-
-    x = (IG_W - new_w) // 2
-    base = img.convert("RGBA")
-    base.paste(logo, (x, logo_top_y), mask=logo)
-    return base.convert("RGB"), logo_top_y
+    return logo
 
 
-def _paste_logo_at(img: Image.Image, logo_top_y: int) -> tuple[Image.Image, int]:
-    """Cola logo flat centralizado horizontalmente em y explícito."""
-    try:
-        logo = Image.open(LOGO_FLAT_PATH).convert("RGBA")
-    except Exception:
-        return img, logo_top_y
-    logo = _remove_white_bg(logo)
-    bbox = logo.getbbox()
-    if bbox:
-        logo = logo.crop(bbox)
-    orig_w, orig_h = logo.size
-    new_w = int(orig_w * LOGO_HEIGHT / orig_h)
-    logo = logo.resize((new_w, LOGO_HEIGHT), Image.LANCZOS)
-    x = (IG_W - new_w) // 2
-    base = img.convert("RGBA")
-    base.paste(logo, (x, logo_top_y), mask=logo)
-    return base.convert("RGB"), logo_top_y
+def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+    words = text.split()
+    lines: list[str] = []
+    current: list[str] = []
+    for word in words:
+        test = " ".join(current + [word])
+        if font.getbbox(test)[2] > max_width and current:
+            lines.append(" ".join(current))
+            current = [word]
+        else:
+            current.append(word)
+    if current:
+        lines.append(" ".join(current))
+    return lines
+
+
+def _calculate_layout(
+    title: str,
+    subtitle: str,
+    text_width: int,
+) -> tuple[ImageFont.FreeTypeFont, list[str], list[str], int, int, int, int]:
+    """
+    Calcula layout completo do bloco de texto, evitando colisão com o logo.
+
+    Retorna:
+        (title_font, title_lines, support_lines,
+         badge_y, title_y, support_y, logo_y)
+
+    Lógica de colisão:
+        Se support_bottom + MIN_SUPPORT_TO_LOGO_GAP > LOGO_Y:
+            → reduz fonte do título (até TITLE_FONT_SIZE_MIN)
+        Se ainda estoura → sobe badge_y até BADGE_TOP_Y - 60px no máximo
+    """
+    support_lines: list[str] = []
+    support_h = 0
+
+    if subtitle:
+        support_font = _load_font(SUPPORT_FONT_SIZE)
+        support_lines = _wrap_text(subtitle, support_font, text_width)[:2]
+        support_line_h = int(SUPPORT_FONT_SIZE * SUPPORT_LINE_SPACING)
+        support_h = len(support_lines) * support_line_h
+
+    badge_font = _load_font(BADGE_FONT_SIZE)
+    badge_sample = badge_font.getbbox("A")
+    badge_h = (badge_sample[3] - badge_sample[1]) + 14 * 2  # pad_y=14
+
+    # Tenta do maior para o menor tamanho de fonte
+    for font_size in range(TITLE_FONT_SIZE_MAX, TITLE_FONT_SIZE_MIN - 1, -OVERFLOW_SHRINK_STEP):
+        title_font = _load_font(font_size)
+        title_lines = _wrap_text(title, title_font, text_width)[:3]
+        line_h = int(font_size * TITLE_LINE_SPACING)
+        title_h = len(title_lines) * line_h
+
+        badge_y  = BADGE_TOP_Y
+        title_y  = badge_y + badge_h + BADGE_TO_TITLE_GAP
+        support_y = title_y + title_h + TITLE_TO_SUPPORT_GAP if subtitle else 0
+        support_bottom = (support_y + support_h) if subtitle else (title_y + title_h)
+
+        if support_bottom + MIN_SUPPORT_TO_LOGO_GAP <= LOGO_Y:
+            break  # cabe com respiro adequado
+
+    return title_font, title_lines, support_lines, badge_y, title_y, support_y, LOGO_Y
 
 
 def _draw_badge(draw: ImageDraw.Draw, category: str, x: int, y: int) -> int:
@@ -263,32 +279,18 @@ def _draw_badge(draw: ImageDraw.Draw, category: str, x: int, y: int) -> int:
     return y + rect_h
 
 
-def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
-    words = text.split()
-    lines: list[str] = []
-    current: list[str] = []
-    for word in words:
-        test = " ".join(current + [word])
-        if font.getbbox(test)[2] > max_width and current:
-            lines.append(" ".join(current))
-            current = [word]
-        else:
-            current.append(word)
-    if current:
-        lines.append(" ".join(current))
-    return lines
-
-
-def _fit_title_font(text: str, max_width: int) -> tuple[ImageFont.FreeTypeFont, list[str]]:
-    """Retorna a maior fonte que faz o título caber em até 3 linhas."""
-    for size in range(TITLE_FONT_SIZE_MAX, TITLE_FONT_SIZE_MIN - 1, -2):
-        font = _load_font(size)
-        lines = _wrap_text(text, font, max_width)
-        if len(lines) <= 3:
-            return font, lines
-    font = _load_font(TITLE_FONT_SIZE_MIN)
-    lines = _wrap_text(text, font, max_width)
-    return font, lines[:3]
+def _paste_logo(img: Image.Image, logo_y: int) -> Image.Image:
+    """Cola logo centralizado horizontalmente em logo_y."""
+    logo = _load_logo()
+    if logo is None:
+        return img
+    orig_w, orig_h = logo.size
+    new_w = int(orig_w * LOGO_HEIGHT / orig_h)
+    logo = logo.resize((new_w, LOGO_HEIGHT), Image.LANCZOS)
+    x = (IG_W - new_w) // 2
+    base = img.convert("RGBA")
+    base.paste(logo, (x, logo_y), mask=logo)
+    return base.convert("RGB")
 
 
 def _compress_webp(img: Image.Image, dest: Path) -> None:
@@ -310,58 +312,43 @@ def generate_ig_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{slug}_ig.webp"
 
-    # 1. Carrega e constrói fundo fotográfico
+    text_width = IG_W - TEXT_MARGIN * 2
+
+    # 1. Foto full-bleed (smart crop — mesma lógica para qualquer proporção)
     with Image.open(cover_path) as raw:
-        img, gradient_start_y = _build_photo_background(raw.convert("RGB"), IG_W, IG_H)
+        img = _smart_crop(raw.convert("RGB"), IG_W, IG_H)
 
-    # 2. Escurece se foto muito clara, depois aplica gradiente
+    # 2. Escurece se muito clara, depois aplica gradiente integrado
     img = _darken_if_bright(img)
-    img = _draw_gradient(img, start_y=gradient_start_y)
+    img = _draw_integrated_gradient(img)
 
-    # 4. Calcula alturas do bloco de texto e posiciona conjunto texto+logo
-    badge_font = _load_font(BADGE_FONT_SIZE)
-    subtitle_font = _load_font(SUBTITLE_FONT_SIZE)
-    title_font, wrapped_lines = _fit_title_font(title, IG_W - MARGIN * 2)
-    line_height = int(title_font.size * 1.15)
-    title_block_h = len(wrapped_lines) * line_height
+    # 3. Calcula layout do bloco de texto com detecção de colisão
+    title_font, title_lines, support_lines, badge_y, title_y, support_y, logo_y = (
+        _calculate_layout(title, subtitle, text_width)
+    )
 
-    subtitle_lines = _wrap_text(subtitle, subtitle_font, IG_W - MARGIN * 2)[:2] if subtitle else []
-    subtitle_line_h = int(SUBTITLE_FONT_SIZE * 1.2)
-    subtitle_block_h = len(subtitle_lines) * subtitle_line_h + (10 if subtitle_lines else 0)
+    # 4. Logo
+    img = _paste_logo(img, logo_y)
 
-    badge_sample = badge_font.getbbox("A")
-    badge_h = (badge_sample[3] - badge_sample[1]) + 14 * 2
-
-    # Ancora de baixo para cima: margem → logo → gap → texto → badge
-    logo_top_y = IG_H - BOTTOM_MARGIN - LOGO_HEIGHT
-    text_bottom = logo_top_y - LOGO_GAP
-    title_y = text_bottom - title_block_h - subtitle_block_h
-    badge_y = title_y - BADGE_TITLE_GAP - badge_h
-
-    # Se o bloco ultrapassar o topo do gradiente, empurra para baixo até caber
-    if badge_y < gradient_start_y:
-        shift = gradient_start_y - badge_y
-        badge_y += shift
-        title_y += shift
-        logo_top_y += shift
-
-    # 3. Logo flat na posição calculada
-    img, _ = _paste_logo_at(img, logo_top_y)
-
+    # 5. Badge + texto
     draw = ImageDraw.Draw(img)
-    _draw_badge(draw, category, MARGIN, badge_y)
+    _draw_badge(draw, category, TEXT_MARGIN, badge_y)
+
+    line_h = int(title_font.size * TITLE_LINE_SPACING)
     y = title_y
-    for line in wrapped_lines:
-        draw.text((MARGIN, y), line, fill=TITLE_COLOR, font=title_font)
-        y += line_height
+    for line in title_lines:
+        draw.text((TEXT_MARGIN, y), line, fill=TITLE_COLOR, font=title_font)
+        y += line_h
 
-    if subtitle_lines:
-        y += TITLE_SUB_GAP
-        for line in subtitle_lines:
-            draw.text((MARGIN, y), line, fill="white", font=subtitle_font)
-            y += subtitle_line_h
+    if support_lines:
+        support_font = _load_font(SUPPORT_FONT_SIZE)
+        support_line_h = int(SUPPORT_FONT_SIZE * SUPPORT_LINE_SPACING)
+        y = support_y
+        for line in support_lines:
+            draw.text((TEXT_MARGIN, y), line, fill="white", font=support_font)
+            y += support_line_h
 
-    # 5. Salva como WebP
+    # 6. Salva WebP
     _compress_webp(img, dest)
 
     return {
