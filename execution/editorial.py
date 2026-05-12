@@ -527,61 +527,80 @@ Crie duas versões de legenda para Instagram com linguagem leve, humana, regiona
 
 O +blog fala com pessoas de Americana, Santa Bárbara d'Oeste, Nova Odessa e Sumaré que querem descobrir eventos, cultura, lazer e boas experiências na região.
 
-A legenda precisa ter cara de Instagram de verdade.
+A legenda precisa parecer escrita para Instagram de verdade.
 Ela não deve parecer release.
 Ela não deve parecer resumo frio de matéria.
+Ela não deve soar poética demais nem artificial.
 Ela não deve ser institucional.
 Ela não deve repetir mecanicamente o texto da arte.
-Ela NÃO deve ter hashtags — nenhuma sequer.
+Ela não deve ter hashtags.
 {hierarchy_str}
+Use somente informações confirmadas.
 
-ESTRUTURA OBRIGATÓRIA — 4 a 6 blocos curtos:
+ABERTURA — REGRA ESSENCIAL:
+A abertura deve ser simples, natural e direta.
+NÃO use frases poéticas ou artificiais como:
+  - "Histórias voando alto"
+  - "A magia da leitura chegou"
+  - "Uma experiência encantadora"
+  - "Prepare-se para se emocionar"
+  - "Cantigas que unem gerações"
+PREFIRA aberturas como:
+  - "Tem história chegando no CEU das Artes."
+  - "O CEU das Artes recebe contação de histórias nesta semana."
+  - "Santa Bárbara tem programação gratuita de leitura nesta semana."
+  - "Boa pedida para quem curte programação cultural com crianças."
 
-1. Abertura curta e natural — uma frase leve que puxe atenção sem "Vem aí" nem "Confira".
-2. Contexto do evento/projeto — o que é, onde acontece.
-3. Informações de serviço — data, horário, local, gratuidade e público quando confirmados.
-4. Camada editorial — por que isso importa para a cidade, a cultura, a região ou quem acompanha o portal.
-5. CTA social — salvar, mandar para alguém, marcar alguém ou comentar, conforme o conteúdo.
-6. CTA para o portal — convidar a acessar o +blog de forma natural (só se fizer sentido).
+ESTRUTURA OBRIGATÓRIA — 5 a 6 blocos curtos:
+
+1. Abertura natural — simples e direta, sem artifício poético.
+2. Contexto principal — o que acontece, onde.
+3. Serviço — data, horário, local, gratuidade e público, quando confirmados.
+4. Camada editorial do +blog — por que isso importa para a cidade, para a cultura, para as crianças ou para o público local. Exemplo: "É uma daquelas ações que aproximam crianças da leitura e ajudam a movimentar os espaços culturais da cidade."
+5. CTA social — natural, variado, não repetir sempre a mesma frase.
+6. CTA para o +blog — convidar para ver os detalhes no portal de forma natural.
+
+PARTICIPANTES: se for citar nomes, citar todos os confirmados para o serviço principal. Se houver risco de omissão, usar formulação genérica como "com diferentes contadores conduzindo as atividades".
 
 TAMANHO:
-- legenda_curta: 3 a 4 blocos curtos
-- legenda_contexto: 5 a 6 blocos curtos — com mais narrativa e camada editorial
+- legenda_curta: 3 a 4 blocos
+- legenda_contexto: 5 a 6 blocos com camada editorial completa
 
-REFERÊNCIA DE ESTILO (inspire-se no tom e ritmo, não copie):
-"Tem história chegando no CEU das Artes
+REFERÊNCIA DE QUALIDADE — tom e estrutura 9/10 (não copie, inspire-se):
+"Tem história chegando no CEU das Artes.
 
-Nos dias 12 e 13 de maio, o projeto Nas Asas da Leitura passa por Santa Bárbara com sessões gratuitas de contação de histórias para crianças e público em geral
+Nos dias 12 e 13 de maio, o projeto Nas Asas da Leitura realiza sessões gratuitas de contação de histórias em Santa Bárbara.
 
-A programação acontece em dois horários, às 9h30 e às 13h30, com Valter Valverde, Renata de Paula e outros contadores conduzindo as atividades
+A programação acontece em dois horários, às 9h30 e às 13h30, com atividades voltadas a estudantes da rede municipal e também ao público em geral.
 
-É aquele tipo de programação simples, bonita e necessária: aproxima as crianças da leitura, movimenta os espaços públicos e cria memória boa na cidade
+É uma daquelas ações que aproximam crianças da leitura e ajudam a movimentar os espaços culturais da cidade.
 
-Se você conhece alguém que curte programação cultural para crianças, já manda esse post
+Se conhece alguém que curte programação cultural para crianças, já manda esse post.
 
-No +blog tem mais detalhes para você se organizar antes de ir"
+No +blog tem os detalhes para você se organizar."
 
 REGRAS ABSOLUTAS:
 - NUNCA usar hashtags (#) — nem uma sequer em nenhum campo
 - não inventar data, horário, local, cidade, valor, gratuidade, atrações ou participantes
-- não repetir mecanicamente o texto da arte
-- não usar "imperdível", "confira", "experiência mágica", "incrível" (elogio genérico)
+- não usar "imperdível", "confira", "experiência mágica", "incrível"
 - não usar linguagem institucional
 - sem créditos de texto ou fotos
 - sem mencionar assessoria ou fonte
 - frases curtas e fluidas, com ritmo de Instagram
-- CTA variado — não usar sempre a mesma frase
+- CTA variado — não repetir sempre a mesma frase
 
 Retorne APENAS um objeto JSON válido:
 {{
-  "legenda_curta": "3 a 4 blocos curtos. SEM hashtags.",
-  "legenda_contexto": "5 a 6 blocos com mais narrativa e camada editorial. SEM hashtags.",
+  "legenda_curta": "3 a 4 blocos. SEM hashtags.",
+  "legenda_contexto": "5 a 6 blocos com camada editorial e CTA. SEM hashtags.",
   "cta_sugerido": "o CTA social escolhido"
 }}"""
 
     user_parts = [f"Fatos confirmados:\n{fatos_str}", f"Resumo da matéria:\n{resumo[:600]}"]
     if arte_str:
         user_parts.append(f"Texto da arte (não repetir mecanicamente):\n{arte_str}")
+    if hierarchy and hierarchy.get("foco_principal"):
+        user_parts.append(f"Hierarquia editorial:\n{json.dumps(hierarchy, ensure_ascii=False, indent=2)}")
     user = "\n\n".join(user_parts)
 
     def _limpar_hashtags(texto: str) -> str:
@@ -593,16 +612,28 @@ Retorne APENAS um objeto JSON válido:
         """Conta blocos/parágrafos separados por linha em branco."""
         return len([b for b in texto.split("\n\n") if b.strip()])
 
+    _ABERTURAS_ARTIFICIAIS = [
+        "voando alto", "magia da leitura", "experiência encantadora",
+        "prepare-se para", "cantigas que unem", "histórias que encantam",
+        "mergulhe em", "deixe-se envolver", "transformando vidas",
+    ]
+
     def _valida_legenda(result: dict) -> list[str]:
         erros = []
         ctx = result.get("legenda_contexto", "")
-        if "#" in result.get("legenda_curta", "") or "#" in ctx:
+        curta = result.get("legenda_curta", "")
+        if "#" in curta or "#" in ctx:
             erros.append("contém hashtag")
-        for proibida in ("imperdível", "confira", "experiência mágica"):
-            if proibida in ctx.lower() or proibida in result.get("legenda_curta", "").lower():
+        for proibida in ("imperdível", "confira", "experiência mágica", "incrível"):
+            if proibida in ctx.lower() or proibida in curta.lower():
                 erros.append(f"contém '{proibida}'")
-        if _blocos(ctx) < 4:
-            erros.append(f"legenda_contexto tem apenas {_blocos(ctx)} bloco(s) — mínimo 4")
+        if _blocos(ctx) < 5:
+            erros.append(f"legenda_contexto tem apenas {_blocos(ctx)} bloco(s) — mínimo 5")
+        primeira_linha = ctx.split("\n")[0].lower() if ctx else ""
+        for artificial in _ABERTURAS_ARTIFICIAIS:
+            if artificial in primeira_linha:
+                erros.append(f"abertura artificial detectada: '{artificial}'")
+                break
         return erros
 
     try:
@@ -624,8 +655,10 @@ Retorne APENAS um objeto JSON válido:
             user_retry = (
                 f"{user}\n\n"
                 f"FEEDBACK DA VALIDAÇÃO: a legenda anterior foi rejeitada por: {feedback}.\n"
-                f"Reescreva com mais contexto, ritmo e camada editorial, mantendo apenas informações confirmadas.\n"
-                f"legenda_contexto deve ter pelo menos 5 blocos separados por linha em branco. Sem hashtags."
+                f"Reescreva com abertura simples e natural (sem poesia artificial), "
+                f"pelo menos 5 blocos em legenda_contexto, camada editorial clara explicando "
+                f"por que o conteúdo importa para a cidade, CTA social e CTA para o +blog. "
+                f"Use somente fatos confirmados. Sem hashtags."
             )
             try:
                 result2 = llm_call_json(system=system, user=user_retry, model=EDITORIAL_MODEL)
