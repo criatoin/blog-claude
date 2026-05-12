@@ -135,24 +135,38 @@ def llm_call_json(system: str, user: str, model: str | None = None) -> dict | li
         RuntimeError: Se não conseguir parsear JSON
     """
     raw = llm_call(system=system, user=user, model=model)
-
-    # Remove bloco de código markdown se presente
     text = raw.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # Remove primeira linha (```json ou ```) e última (```)
-        inner = "\n".join(lines[1:])
-        if inner.rstrip().endswith("```"):
-            inner = inner.rstrip()[:-3].rstrip()
-        text = inner.strip()
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    def _extract_json_block(s: str) -> str:
+        """Extrai conteúdo de bloco ```json ... ``` ou retorna a string original."""
+        import re as _re
+        # Procura bloco ```json ... ``` mesmo com texto antes
+        m = _re.search(r"```(?:json)?\s*\n([\s\S]*?)```", s)
+        if m:
+            return m.group(1).strip()
+        # Tenta extrair JSON bruto entre { ou [ e o fechamento correspondente
+        for start_ch, end_ch in (("{", "}"), ("[", "]")):
+            idx = s.find(start_ch)
+            if idx != -1:
+                # Encontra o fechamento correto contando profundidade
+                depth = 0
+                in_str = False
+                end_idx = -1
+                for i, ch in enumerate(s[idx:], start=idx):
+                    if ch == '"' and (i == 0 or s[i-1] != "\\"):
+                        in_str = not in_str
+                    if not in_str:
+                        if ch == start_ch:
+                            depth += 1
+                        elif ch == end_ch:
+                            depth -= 1
+                            if depth == 0:
+                                end_idx = i
+                                break
+                if end_idx != -1:
+                    return s[idx:end_idx+1]
+        return s
 
-    # Fallback: substitui quebras de linha literais dentro de strings JSON por \n
-    import re as _re
     def _escape_newlines_in_strings(s: str) -> str:
         """Substitui \n literais dentro de strings JSON por \\n."""
         result = []
@@ -172,8 +186,22 @@ def llm_call_json(system: str, user: str, model: str | None = None) -> dict | li
             i += 1
         return "".join(result)
 
+    # Tentativa 1: parse direto
     try:
-        return json.loads(_escape_newlines_in_strings(text))
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Tentativa 2: extrai bloco JSON e tenta parse
+    extracted = _extract_json_block(text)
+    try:
+        return json.loads(extracted)
+    except json.JSONDecodeError:
+        pass
+
+    # Tentativa 3: escapa \n literais dentro de strings e tenta parse
+    try:
+        return json.loads(_escape_newlines_in_strings(extracted))
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Resposta não é JSON válido: {e}\nTexto: {text[:500]}")
 
