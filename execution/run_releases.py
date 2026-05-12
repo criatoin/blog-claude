@@ -107,225 +107,6 @@ def _run_json(args: list[str]) -> dict | list | None:
         return None
 
 
-def _llm_relevancia(email: dict) -> dict:
-    """Avalia se o email é um release relevante para o +blog."""
-    from llm_call import llm_call_json
-
-    system = """Você é o editor do +blog, portal de cultura e diversão de Americana, Santa Bárbara d'Oeste (SBO), Nova Odessa e Sumaré.
-
-Critérios de PUBLICAR (TODOS devem ser atendidos):
-1. É das cidades: Americana, Santa Bárbara d'Oeste, Nova Odessa ou Sumaré
-2. O tema é: cultura, arte, música, teatro, cinema, dança, cursos/aulas gratuitas ou diversão
-
-NÃO PUBLICAR (qualquer um desses → descartar):
-- Obras, saúde pública, saneamento, meio ambiente, política, administração municipal
-- Esporte profissional/competitivo (exceto evento aberto ao público como diversão)
-- Outras cidades sem relação com a região
-- Produto comercial puro / propaganda sem conteúdo editorial
-- Release duplicado de evento já registrado
-
-Retorne APENAS um objeto JSON:
-{"relevante": true/false, "motivo_descarte": "motivo se relevante=false, senão vazio"}"""
-
-    user = f"""Assunto: {email.get('subject', '')}
-Remetente: {email.get('sender', '')}
-Data: {email.get('date', '')}
-
-Corpo:
-{email.get('body_text', '') or email.get('body_html', '')[:3000]}"""
-
-    try:
-        return llm_call_json(system=system, user=user)
-    except Exception as e:
-        print(f"[run_releases] Erro ao avaliar relevância: {e}", file=sys.stderr)
-        return {"relevante": False, "motivo_descarte": f"Erro na avaliação: {e}"}
-
-
-def _llm_reescrever(email: dict) -> dict:
-    """Reescreve o email como post do +blog."""
-    from llm_call import llm_call_json
-
-    system = """Você é o editor do +blog, portal de cultura e diversão de Americana, Santa Bárbara d'Oeste (SBO), Nova Odessa e Sumaré.
-
-════════════════════════════════
-VOZ EDITORIAL
-════════════════════════════════
-Escreva como um amigo da cidade contando uma boa novidade — informal, direto, entusiasmado sem exagero.
-Abra com um hook forte que prenda a atenção logo na primeira linha (ex: "A galera que curte teatro em SBO tem novidade boa essa semana.").
-Frases curtas. Parágrafos de 3–5 linhas. Nunca parágrafo de linha única.
-Palavras proibidas: "robusto", "sinergia", "ecossistema", "haja vista", "no que tange", "destarte", "ademais".
-Sem emoji. Sem jargão corporativo.
-Nunca inventar dados — use [DADO AUSENTE: descrição] se faltar informação.
-
-════════════════════════════════
-QUALIDADE DE CONTEÚDO — REGRA ABSOLUTA
-════════════════════════════════
-PROIBIDO resumir o release. Use CADA dado presente no email original:
-- Todo artista, atração, palestrante, convidado → cite pelo nome completo
-- Toda data, horário, local, endereço → transcreva completo
-- Todo valor, forma de inscrição, link, telefone → inclua
-- Toda citação de organizador, secretário, autoridade → use entre aspas com atribuição
-- Toda programação, cronograma ou lista de atividades → reproduza integralmente
-
-MÍNIMO OBRIGATÓRIO: 500 palavras de conteúdo (excluindo o bloco Serviço).
-Escreva 5–6 parágrafos ricos e densos. Jamais 2 parágrafos rasos.
-O leitor deve saber exatamente o quê, quando, onde, quanto custa e como participar.
-Se o release mencionar múltiplos eventos ou datas, detalhe CADA UM.
-
-════════════════════════════════
-HTML PURO — PROIBIDO USAR MARKDOWN
-════════════════════════════════
-O campo "html" deve conter APENAS tags HTML. NUNCA use Markdown.
-
-PROIBIDO (causa quebra visual no site):
-  ** texto **   →  use  <strong>texto</strong>
-  * texto *     →  use  <em>texto</em>
-  ## Título     →  use  <h2>Título</h2>
-  # Título      →  use  <h2>Título</h2>
-  - item        →  use  <ul><li>item</li></ul>
-
-OBRIGATÓRIO:
-  Negrito       →  <strong>texto</strong>
-  Itálico       →  <em>texto</em>
-  Subtítulo     →  <h2>Texto</h2>
-  Parágrafo     →  <p>texto</p>
-  Lista         →  <ul><li>item</li></ul>
-
-════════════════════════════════
-ESTRUTURA POR TIPO
-════════════════════════════════
-
-[EVENTO FUTURO] — show, feira, festival, palestra, curso, exposição:
-<p>[Hook forte: 1–2 frases que antecipam o evento com entusiasmo real. Diga o quê, quando e onde.]</p>
-<p>[Contexto: por que vale a pena ir? O que o leitor vai encontrar lá? Cite o organizador se o release mencionar, com aspas e atribuição.]</p>
-<p>[Programação completa: liste CADA atração, artista, atividade citada no release. Use <strong> nos nomes de artistas e eventos.]</p>
-<p>[Detalhes práticos: inscrição, o que levar, faixa etária, acessibilidade, estacionamento — tudo que estiver no release.]</p>
-<h2>Serviço</h2>
-<ul>
-  <li><strong>O quê:</strong> [nome completo do evento]</li>
-  <li><strong>Quando:</strong> [data e horário completos]</li>
-  <li><strong>Onde:</strong> [endereço completo com bairro e cidade]</li>
-  <li><strong>Entrada:</strong> [gratuita / valor / como obter ingresso / link]</li>
-  <li><strong>Mais informações:</strong> [telefone / site / redes sociais / WhatsApp]</li>
-</ul>
-
-[NOTÍCIA/ANÚNCIO] — novidade institucional, resultado, conquista:
-<p>[Hook: o fato principal em 1–2 frases. Quem fez o quê, de forma direta e engajante.]</p>
-<p>[Contexto: por que isso importa para o morador? Qual problema resolve ou que avanço representa?]</p>
-<p>[Detalhes: números, prazos, etapas, declarações. Cite quem disse o quê, com atribuição. Não resuma — use os dados do release completos.]</p>
-<p>[Próximos passos ou desdobramentos, se houver no release.]</p>
-
-[RETROSPECTIVA] — balanço, resultado, evento já realizado:
-<p>[Hook: o resultado principal de forma viva — dê a dimensão do que aconteceu.]</p>
-<p>[Como foi: dados de público, números, destaques da programação, momentos marcantes.]</p>
-<p>[Reações: citações de organizadores, participantes ou autoridades presentes, com atribuição.]</p>
-<p>[Próxima edição ou desdobramentos, se houver no release.]</p>
-
-════════════════════════════════
-SEO
-════════════════════════════════
-Título: máx 65 chars. Fórmula: [tema principal] + [cidade] + [data/contexto se couber].
-Exemplos: "Festival de Jazz chega a Americana em abril", "Curso gratuito de teatro abre inscrições em SBO"
-Slug: lowercase, hífens, sem acentos, sem stop words, sem underscore.
-Keyword principal no primeiro parágrafo.
-
-════════════════════════════════
-CATEGORIAS WORDPRESS (use o ID exato)
-════════════════════════════════
-Show, concerto, festival de música → Música: 23
-Teatro, dança, circo, performance → Arte: 22
-Cinema, série, documentário → Audiovisual: 533
-Livro, leitura, autor, literatura → Literatura: 540
-Curso gratuito, oficina, palestra, workshop → Educação: 384
-Festa, carnaval, bloco → Diversão: 11 (Carnaval: 561 se for carnaval)
-Exposição, museu, galeria → Cultura: 13
-O que fazer / evento misto → Rolês: 19
-Gastronomia, restaurante, feira de comida → Comida: 10
-Evento geral sem categoria específica → Eventos: 12
-Prefira sempre a mais específica. Ex: "Círculo do Livro" → Literatura (540), nunca Eventos (12).
-
-════════════════════════════════
-TAGS
-════════════════════════════════
-Gere 5–8 tags em lowercase. Inclua: nome da cidade, tema, nome do evento ou local.
-Exemplos: ["americana", "musica ao vivo", "show gratuito", "teatro municipal", "cultura"]
-
-Retorne APENAS um objeto JSON válido (sem markdown, sem blocos ```json):
-{
-  "titulo": "...",
-  "slug": "...",
-  "wp_category_id": 12,
-  "html": "<p>...</p>",
-  "tags": ["tag1", "tag2", "tag3"],
-  "credito_imagem": "Foto: Nome via Fonte ou vazio",
-  "credito_texto": "Nome do autor ou assessoria que assina o release (ex: 'Secom / Prefeitura de Americana', 'Assessoria SESC', 'Daniela Alves (MTb 23.611)'). Se não identificado, use o nome da organização remetente.",
-  "dados_ausentes": []
-}"""
-
-    user = f"""Assunto: {email.get('subject', '')}
-Remetente: {email.get('sender', '')}
-Data: {email.get('date', '')}
-
-Corpo do release:
-{email.get('body_text', '') or email.get('body_html', '')[:8000]}"""
-
-    try:
-        return llm_call_json(system=system, user=user)
-    except Exception as e:
-        raise RuntimeError(f"Erro ao reescrever post: {e}")
-
-
-def _llm_legenda_ig(titulo: str, html: str) -> str:
-    """Gera legenda para Instagram."""
-    from llm_call import llm_call
-
-    system = """Você é um especialista em social media com 10 anos de experiência em contas de cultura e entretenimento local.
-Cria legendas para o @maisblogoficial — portal de cultura e diversão da região de Americana/SP.
-
-## Estrutura obrigatória (nesta ordem, sem variações)
-
-1. **GANCHO** — 1 linha única, antes do "ver mais"
-   - Prenda o scroll com um dado concreto, data, valor, ou fato específico do post.
-   - PROIBIDO: "Vem aí", "Confira", "Sabia que", "Que tal", "Incrível", "Não perca".
-   - BOM: "Entrada gratuita, sábado, 15h." / "R$ 225 mil disponíveis para festivais culturais em Americana."
-
-2. **CORPO** — 2 parágrafos curtos (máx 2 linhas cada), separados por linha em branco
-   - Detalhes concretos: onde, quando, o quê, pra quem, quanto custa.
-   - Tom de amigo dando uma dica — nunca assessoria de imprensa.
-
-3. **CTA obrigatório** — 1 linha exata, SEMPRE convidando a ler a matéria completa no site
-   - Use uma dessas frases (escolha a mais natural): "Matéria completa no +blog — link na bio 🔗" / "Todos os detalhes no +blog — link na bio." / "Leia a matéria completa: link na bio."
-   - NUNCA use "Salva esse post" como único CTA — sempre direcione ao site.
-
-4. **HASHTAGS** — linha separada, EXATAMENTE 5, nem mais nem menos
-   - Formato: 2 do tema + 2 da cidade/região + 1 da marca (#maisblog obrigatória)
-   - Cidades: #americana #santabarbaradoeste #novaodessa #sumare #interiordeSP
-   - REGRA DURA: conte as hashtags antes de finalizar. Se tiver mais de 5, remova as excedentes.
-
-## Restrições de tamanho
-- Gancho: máx 100 caracteres
-- Total da legenda (incluindo hashtags): máx 800 caracteres
-- Se ultrapassar 800 caracteres, corte o corpo — nunca corte o CTA nem as hashtags.
-
-## Tom e estilo
-- Especialista em redes sociais que conhece a região — voz próxima, direta, sem exageros.
-- Emojis: máx 2 por legenda, apenas funcionais (📌 🔗 🎭 🎶 — não decorativos).
-- Zero adjetivos vazios: "incrível", "maravilhoso", "imperdível", "fantástico", "especial".
-- Zero frases de assessoria: "a prefeitura informa", "o evento contará com", "não perca a oportunidade".
-
-Retorne APENAS o texto final da legenda. Sem prefixos, sem explicações, sem markdown."""
-
-    user = f"""Post: {titulo}
-
-Conteúdo:
-{html[:2000]}"""
-
-    try:
-        return llm_call(system=system, user=user)
-    except Exception as e:
-        return f"Confira este post incrível no +blog! Link na bio.\n\n#maisblog #americana #culturaameri"
-
-
 def _imagem_relevante(image_path: str, titulo: str) -> bool:
     """
     Usa Gemini Vision para verificar se a imagem é relevante ao título do post.
@@ -401,41 +182,7 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         return False
 
 
-def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
-    """
-    Usa LLM para gerar uma query de busca de imagem em inglês.
-    Foca na atividade/pessoas — nunca em landmarks ou infraestrutura da cidade.
-    """
-    system = (
-        "You generate short image search queries (3-6 words) in English for stock photo sites like Unsplash and Pexels. "
-        "Rules:\n"
-        "1. Focus on the ACTIVITY or PEOPLE depicted (e.g. 'women fitness class', 'jazz concert crowd', 'cooking class students').\n"
-        "2. NEVER include city names, landmarks, parks, buildings, or local infrastructure — "
-        "stock photos won't have specific Brazilian city locations.\n"
-        "3. Prefer showing REAL PEOPLE doing the activity over empty venues or abstract concepts.\n"
-        "4. If it's a fitness/sport event → show people exercising.\n"
-        "5. If it's a cultural/arts event → show the art form or audience.\n"
-        "6. If it's a food event → show the food or people eating.\n"
-        "7. If it's a lecture/talk event → show audience in auditorium or speaker.\n"
-        "Output ONLY the query string, nothing else."
-    )
-    user = f"Article title: {titulo}"
-    if resumo:
-        user += f"\nSummary: {resumo[:300]}"
-    try:
-        from llm_call import llm_call
-        raw = llm_call(system=system, user=user)
-        # Pega apenas a primeira linha não-vazia — LLM às vezes retorna lista
-        query = next((l.strip().strip('"').strip("'") for l in raw.splitlines() if l.strip()), "")
-        if query:
-            print(f"[run_releases] Query imagem gerada: '{query}'", file=sys.stderr)
-            return query
-    except Exception as e:
-        print(f"[run_releases] Falha ao gerar query de imagem ({e}), usando slug.", file=sys.stderr)
-    return titulo[:60]
-
-
-def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str]:
+def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | None = None) -> tuple[str, str]:
     """
     Seleciona ou gera imagem de capa.
 
@@ -448,6 +195,8 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str
 
     Retorna (cover_path, foto_credit).
     """
+    if fatos is None:
+        fatos = {}
     attachments = email.get("attachments", [])
 
     if attachments:
@@ -484,7 +233,8 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str
 
     # Só chega aqui se não havia fotos no email ou todas foram rejeitadas pela vision.
     # Tenta Unsplash/Pexels antes de gerar por IA.
-    img_query = _gerar_query_imagem(titulo)
+    from editorial import query_from_fatos
+    img_query = query_from_fatos(fatos, titulo)
     print(f"[run_releases] Buscando imagem em bancos gratuitos | query='{img_query}'...", file=sys.stderr)
     gen_result = _run_json([
         str(SCRIPT_DIR / "image_generate.py"),
@@ -503,17 +253,23 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "") -> tuple[str, str
 
 def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
     """Processa um email pelo pipeline completo. Retorna dict com resultado."""
+    from editorial import (
+        extrair_fatos, avaliar_relevancia, gerar_conteudo,
+        gerar_legenda, validar_fatos, resumo_telegram,
+    )
+
     email_id = email.get("id", "?")
     subject = email.get("subject", "")
     sender = email.get("sender", "")
     date = email.get("date", "")
+    body_text = email.get("body_text", "") or email.get("body_html", "")[:8000]
 
-    # Deduplicação 1: arquivo local (rápido, perdido no restart)
+    # Deduplicação 1: arquivo local
     if not dry_run and email_id in _load_processed():
         print(f"\n[run_releases] → Já processado (arquivo), pulando: {subject[:60]}", file=sys.stderr)
         return {"email_id": email_id, "relevante": False, "motivo": "Já processado anteriormente"}
 
-    # Deduplicação 2: Sheets (persistente entre restarts do container)
+    # Deduplicação 2: Sheets (persistente)
     if not dry_run and processed_subjects is not None:
         key = (subject.strip().lower(), sender.strip().lower())
         if key in processed_subjects:
@@ -522,75 +278,80 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
 
     print(f"\n[run_releases] → Processando: {subject[:60]}", file=sys.stderr)
 
-    # 1. Avalia relevância
-    relevancia = _llm_relevancia(email)
-    relevante = relevancia.get("relevante", False)
-    motivo = relevancia.get("motivo_descarte", "")
+    # 1. Extrai fatos
+    print(f"[run_releases]   1/6 Extraindo fatos...", file=sys.stderr)
+    fatos = extrair_fatos(body_text)
+
+    # 2. Avalia relevância
+    print(f"[run_releases]   2/6 Avaliando relevância...", file=sys.stderr)
+    avaliacao = avaliar_relevancia(body_text, fatos)
+    relevante = avaliacao.get("relevante", False)
 
     if not relevante:
+        motivo = avaliacao.get("motivo_aprovacao_ou_descarte", "Não relevante")
         print(f"[run_releases]   Não relevante: {motivo}", file=sys.stderr)
         if not dry_run:
             _run_json([
                 str(SCRIPT_DIR / "sheets_write.py"), "log-release",
                 "--data", json.dumps({
-                    "sender": sender,
-                    "subject": subject,
-                    "date": date,
-                    "relevante": False,
-                    "status": "Descartado",
+                    "sender": sender, "subject": subject, "date": date,
+                    "relevante": False, "status": "Descartado",
                     "motivo_descarte": motivo,
                 }, ensure_ascii=False),
             ])
         return {"email_id": email_id, "relevante": False, "motivo": motivo}
 
-    # 2. Reescreve post
-    try:
-        post = _llm_reescrever(email)
-    except RuntimeError as e:
-        print(f"[run_releases]   Erro ao reescrever: {e}", file=sys.stderr)
-        return {"email_id": email_id, "relevante": True, "error": str(e)}
+    # 3. Gera conteúdo editorial
+    print(f"[run_releases]   3/6 Gerando conteúdo...", file=sys.stderr)
+    post = gerar_conteudo(body_text, fatos, avaliacao, sender=sender)
 
-    titulo = post.get("titulo", subject[:65])
-    slug = post.get("slug", "post-sem-slug")
+    titulo = post.get("titulo_site") or subject[:65]
+    slug = post.get("slug") or "post-sem-slug"
     html = post.get("html", "")
     wp_category_id = post.get("wp_category_id", 12)
     if wp_category_id not in VALID_CATEGORY_IDS:
         print(f"[run_releases]   Categoria inválida ({wp_category_id}), usando Eventos (12).", file=sys.stderr)
         wp_category_id = 12
     tags = post.get("tags", [])
-    credito_imagem = post.get("credito_imagem", "")
-    credito_texto = post.get("credito_texto", "") or sender.split("<")[0].strip() or "Assessoria"
+    creditos = post.get("creditos_wordpress", {})
 
     print(f"[run_releases]   Título: {titulo}", file=sys.stderr)
 
     if dry_run:
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}
 
-    # 3. Pipeline de imagem
-    cover_path, foto_credit_gerada = _pipeline_imagem(email, slug, titulo)
+    # 4. Pipeline de imagem (usa fatos para query — sem LLM extra)
+    cover_path, foto_credit_gerada = _pipeline_imagem(email, slug, titulo, fatos=fatos)
     if not cover_path:
-        print(f"[run_releases]   Aviso: sem imagem de capa disponível.", file=sys.stderr)
-        cover_path = ""
-    # Crédito final: prioriza o do release; fallback para crédito da imagem gerada
-    foto_credit = credito_imagem or foto_credit_gerada or "Divulgação"
+        print(f"[run_releases]   Aviso: sem imagem de capa.", file=sys.stderr)
 
-    # 4. Arte Instagram
+    # Crédito de foto: release > gerada > Divulgação
+    foto_credit = creditos.get("fotos") or foto_credit_gerada or "Divulgação"
+
+    # 5. Arte Instagram
     ig_path = ""
     ig_url = ""
     if cover_path and Path(cover_path).exists():
         category_name = CATEGORY_NAMES.get(wp_category_id, "Eventos")
-        ig_result = _run_json([
+        art_title = post.get("texto_arte", {}).get("titulo_principal", "")
+        art_subtitle = post.get("texto_arte", {}).get("linha_apoio", "")
+        ig_args = [
             str(SCRIPT_DIR / "instagram_image.py"),
             "--cover", cover_path,
             "--slug", slug,
             "--title", titulo,
             "--category", category_name,
             "--output-dir", OUTPUT_DIR,
-        ])
+        ]
+        if art_title:
+            ig_args += ["--art-title", art_title]
+        if art_subtitle:
+            ig_args += ["--art-subtitle", art_subtitle]
+        ig_result = _run_json(ig_args)
         if ig_result:
             ig_path = ig_result.get("path", "")
 
-    # Upload da arte IG para WP Media Library
+    # Upload da arte IG para WP
     if ig_path and Path(ig_path).exists():
         upload_result = _run_json([
             str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
@@ -600,17 +361,31 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         if upload_result:
             ig_url = upload_result.get("url", "")
 
-    # 5. Legenda Instagram
-    legenda = _llm_legenda_ig(titulo, html)
+    # 6. Legenda Instagram (sem créditos — exclusivos do WP)
+    print(f"[run_releases]   4/6 Gerando legenda IG...", file=sys.stderr)
+    legendas = gerar_legenda(fatos, post.get("resumo_telegram", ""))
+    legenda_curta = legendas.get("legenda_curta", "")
+    legenda_longa = legendas.get("legenda_contexto", "")
+    hashtags = legendas.get("hashtags", [])
 
-    # 6. Cria rascunho no WordPress
-    # Adiciona bloco de créditos ao final do HTML
-    creditos_html = (
-        f'<p><small><em>Texto: {credito_texto}, reescrito pela equipe do +blog. '
-        f'Fotos: {foto_credit}</em></small></p>'
-    )
+    # 7. Validação factual
+    print(f"[run_releases]   5/6 Validando fatos...", file=sys.stderr)
+    post_para_validar = {**post, "legenda_curta": legenda_curta}
+    validacao = validar_fatos(body_text, fatos, post_para_validar)
+    risco = validacao.get("risco_alucinacao", "baixo")
+    if risco != "baixo":
+        print(f"[run_releases]   Risco de alucinacao: {risco}", file=sys.stderr)
+
+    # 8. Resumo para Telegram
+    print(f"[run_releases]   6/6 Montando resumo Telegram...", file=sys.stderr)
+    card_meta = resumo_telegram(post, validacao, avaliacao)
+
+    # 9. HTML com bloco de créditos ao final (exclusivo WordPress)
+    credito_texto = creditos.get("texto", "").strip() or f"reescrito pela equipe do +blog com informações de {sender}"
+    creditos_html = f'<p><em>Texto: {credito_texto}. Fotos: {foto_credit}</em></p>'
     html_com_creditos = html + "\n" + creditos_html
 
+    # 10. Publica rascunho no WordPress
     wp_args = [
         str(SCRIPT_DIR / "wp_publish.py"), "create",
         "--title", titulo,
@@ -627,21 +402,16 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         print(f"[run_releases]   Erro ao criar rascunho no WP.", file=sys.stderr)
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "error": "wp_publish falhou"}
 
-    # Marca email como processado para evitar duplicação em runs futuros
     _mark_processed(email_id)
-
     post_id = wp_result.get("post_id")
     edit_url = wp_result.get("edit_url", "")
 
-    # 7. Registra no Sheets
+    # 11. Registra no Sheets
     sheets_log = _run_json([
         str(SCRIPT_DIR / "sheets_write.py"), "log-release",
         "--data", json.dumps({
-            "sender": sender,
-            "subject": subject,
-            "date": date,
-            "relevante": True,
-            "status": "Aguardando aprovação",
+            "sender": sender, "subject": subject, "date": date,
+            "relevante": True, "status": "Aguardando aprovação",
             "link_post": edit_url,
         }, ensure_ascii=False),
     ])
@@ -653,31 +423,30 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
             "--data", json.dumps({
                 "id_post": str(post_id),
                 "titulo": titulo,
-                "legenda": legenda,
-                "hashtags": "",
+                "legenda": legenda_curta,
+                "hashtags": " ".join(hashtags),
                 "status": "Pronta",
                 "path_imagem": ig_url,
+                "legenda_longa": legenda_longa,
             }, ensure_ascii=False),
         ])
 
-    # 8. Notifica Telegram (SEM --listen — bot daemon cuida dos callbacks)
+    # 12. Notifica Telegram com card enriquecido
     notify_args = [
         str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
         "--post-id", str(post_id),
         "--title", titulo,
-        "--summary", html[:300].replace("<", "").replace(">", "")[:200],
+        "--summary", post.get("resumo_telegram", html[:300].replace("<", "").replace(">", "")[:200]),
         "--edit-url", edit_url,
         "--cover", cover_path or "",
         "--sheets-row-id", sheets_row_id,
+        "--card-meta", json.dumps(card_meta, ensure_ascii=False),
     ]
     if ig_path:
-        notify_args += ["--ig-image", ig_path, "--ig-caption", legenda]
-    notify_result = _run(notify_args)
-    if notify_result.returncode != 0:
-        print(f"[run_releases]   Aviso: telegram_notify falhou (código {notify_result.returncode}):\n"
-              f"{notify_result.stderr[:500]}", file=sys.stderr)
+        notify_args += ["--ig-image", ig_path, "--ig-caption", legenda_curta]
+    _run(notify_args)
 
-    print(f"[run_releases]   ✅ Rascunho #{post_id} criado. Card enviado ao Telegram.", file=sys.stderr)
+    print(f"[run_releases]   Rascunho #{post_id} criado. Card enviado ao Telegram.", file=sys.stderr)
 
     return {
         "email_id": email_id,
@@ -685,6 +454,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         "titulo": titulo,
         "post_id": post_id,
         "sheets_row_id": sheets_row_id,
+        "risco_alucinacao": risco,
     }
 
 
