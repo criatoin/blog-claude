@@ -140,13 +140,17 @@ def generate_ig_image(
     d.text((TX + PW, TY + PH), cat_up, font=ft, fill=(0, 0, 0))
     tag_bottom = rect[3]
 
-    # Título — tamanho adaptativo pela quantidade de caracteres
-    n = len(title)
-    fs = 92 if n <= 12 else (82 if n <= 18 else 72)
-    fti    = _load_font(fs, "black")
-    linhas = _quebrar_linhas(title, fti, 940, d)
-    ty     = tag_bottom + 22
-    for linha in linhas[:3]:
+    # Título — grupos de 2 palavras por linha, fonte máxima que cabe em 940px
+    words  = title.split()
+    linhas = [" ".join(words[i:i+2]) for i in range(0, len(words), 2)]
+    fs = 105
+    while fs >= 72:
+        fti = _load_font(fs, "black")
+        if max(d.textlength(l, font=fti) for l in linhas) <= 940:
+            break
+        fs -= 2
+    ty = tag_bottom + 22
+    for linha in linhas:
         d.text((68, ty), linha, font=fti, fill=(255, 255, 255))
         ty += int(fti.size * 1.08)
 
