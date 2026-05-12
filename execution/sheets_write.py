@@ -51,7 +51,7 @@ HEADERS = {
     ],
     "Legendas IG": [
         "id_post", "titulo", "legenda", "hashtags",
-        "status", "data_postagem", "path_imagem",
+        "status", "data_postagem", "path_imagem", "legenda_longa",
     ],
     "Pautas": [
         "id", "titulo", "keyword", "categoria",
@@ -209,6 +209,7 @@ def cmd_legenda_ig(data: dict) -> dict:
         data.get("status", "Pronta"),
         data.get("data_postagem", ""),
         data.get("path_imagem", ""),
+        data.get("legenda_longa", ""),
     ]
     return _append_row("Legendas IG", row)
 
