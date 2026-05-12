@@ -403,7 +403,7 @@ REGRAS PARA texto_arte
 - titulo_principal: máx 6 palavras, SEM ponto final, SEM hashtags (#)
 - titulo_principal NÃO pode ser igual ao titulo_site
 - titulo_principal NÃO pode conter: "imperdível", "confira", "não perca", "vem aí", "promete", "programação especial", "acontece em"
-- linha_apoio: máx 35 caracteres no total — frase curta que cabe em uma linha, sem ponto final, sem hashtag, não repetir o título
+- linha_apoio: máx 60 caracteres no total — frase curta que cabe em uma linha, sem ponto final, sem hashtag, não repetir o título
 - NUNCA usar hashtags (#) em nenhum campo de texto_arte
 - só usar "gratuito" ou "grátis" se gratuito=true nos fatos extraídos
 - só mencionar cidade, data ou local se estiverem nos fatos extraídos
@@ -885,19 +885,18 @@ def validar_arte(arte: dict, fatos: dict, release_titulo: str = "") -> tuple[dic
         alertas.append("titulo_principal igual ao release — fallback")
         titulo = _fallback_titulo_arte(fatos)
 
-    # 7. Linha de apoio: máx 35 caracteres (deve caber em uma linha sem quebra)
-    if linha and len(linha) > 35:
+    # 7. Linha de apoio: máx 60 caracteres (quebra automática no render)
+    if linha and len(linha) > 60:
         alertas.append(f"linha_apoio longa ({len(linha)} chars), truncada")
-        # Trunca na última palavra que ainda cabe em 35 chars
         palavras_linha = linha.split()
         acum = ""
         for p in palavras_linha:
             candidato = (acum + " " + p).strip()
-            if len(candidato) <= 35:
+            if len(candidato) <= 60:
                 acum = candidato
             else:
                 break
-        linha = acum if acum else linha[:35]
+        linha = acum if acum else linha[:60]
 
     # 8. Badge: máx 2 palavras
     if badge and len(badge.split()) > 2:
@@ -1009,7 +1008,7 @@ Regras do texto_arte:
 - badge: 1 ou 2 palavras em maiúsculas, sem hashtag
 - titulo_principal: máx 6 palavras, sem ponto final, sem hashtag, sem palavras proibidas
 - titulo_principal deve refletir o foco principal — não use atividades passadas nem itens proibidos
-- linha_apoio: máx 35 caracteres no total — deve caber em uma linha, sem hashtag
+- linha_apoio: máx 60 caracteres no total — deve caber em uma linha, sem hashtag
 - NUNCA usar hashtags em nenhum campo
 - só mencionar gratuidade se gratuito=true nos fatos
 
