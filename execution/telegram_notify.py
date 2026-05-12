@@ -133,8 +133,18 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
         alertas = card_meta.get("alertas", [])
 
         loc_cat = f"📍 {_escape(cidade)} · {_escape(categoria)}" if cidade or categoria else ""
-        scores = f"📊 Site {site_score}/10 · Instagram {ig_score}/10" if site_score or ig_score else ""
-        urg_line = f"⏰ Urgência: {urgencia}/10" if urgencia else ""
+        try:
+            site_n = int(float(site_score)) if site_score else ""
+            ig_n = int(float(ig_score)) if ig_score else ""
+            scores = f"📊 Site {site_n}/10 · Instagram {ig_n}/10" if (site_score or ig_score) else ""
+        except (ValueError, TypeError):
+            scores = ""
+
+        try:
+            urg_n = int(float(urgencia)) if urgencia else ""
+            urg_line = f"⏰ Urgência: {urg_n}/10" if urgencia else ""
+        except (ValueError, TypeError):
+            urg_line = ""
         acao_line = f"💡 {_escape(acao)}" if acao else ""
         alerta_line = (
             f"⚠️ Revisar: {_escape('; '.join(str(a) for a in alertas[:2]))}"
@@ -162,6 +172,10 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
             f"{_escape(summary)}\n\n"
             f"[Editar rascunho]({edit_url})"
         )
+
+    # Cap de 1024 caracteres (limite do Telegram para sendPhoto caption)
+    if len(caption) > 1024:
+        caption = caption[:1021] + "…"
 
     # Monta botões: Site sempre presente; IG só se tiver imagem
     row = [{"text": "✅ Site", "callback_data": f"publish:{post_id}:{sheets_row_id}"}]
@@ -547,7 +561,12 @@ def main() -> None:
     if args.command == "send-pauta-list":
         result = cmd_send_pauta_list(json.loads(args.data))
     elif args.command == "send-release":
-        card_meta_parsed = json.loads(args.card_meta) if args.card_meta else None
+        card_meta_parsed = None
+        if args.card_meta:
+            try:
+                card_meta_parsed = json.loads(args.card_meta)
+            except json.JSONDecodeError as e:
+                print(f"[telegram_notify] Aviso: --card-meta JSON inválido ({e}), enviando card simples.", file=sys.stderr)
         result = cmd_send_release(
             args.post_id, args.title, args.summary,
             args.edit_url, args.cover, args.sheets_row_id,
