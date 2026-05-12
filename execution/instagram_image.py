@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 load_dotenv()
 
@@ -92,23 +92,16 @@ def generate_ig_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{slug}_ig.webp"
 
-    # ── CAMADA 1: Blur cobre TODO o canvas ────────────────────────────────────
+    # ── CAMADA 1: Fundo escuro sólido cobre TODO o canvas ────────────────────
+    # Fundo preto/escuro uniforme: garante que a zona abaixo da foto (quando
+    # a foto é horizontal e não cobre o canvas inteiro) fique escura e
+    # compatível com o degradê magenta/roxo — sem mancha de blur cinza.
     src = Image.open(cover_path).convert("RGBA")
+    canvas = Image.new("RGBA", (W, H), (10, 0, 15, 255))  # roxo-preto escuro
 
-    # cover crop manual: max(scale_x, scale_y) garante que não sobra área vazia
-    scale = max(W / src.width, H / src.height)
-    bw = int(src.width * scale)
-    bh = int(src.height * scale)
-    bg = src.resize((bw, bh), Image.LANCZOS)
-    left = (bw - W) // 2
-    top  = max(0, (bh - H) // 3)  # ancora no terço superior
-    bg = bg.crop((left, top, left + W, top + H))
-    bg = bg.filter(ImageFilter.GaussianBlur(radius=22))
-    dark = Image.new("RGBA", (W, H), (0, 0, 0, 90))
-    bg = Image.alpha_composite(bg, dark)
-    canvas = bg.copy()  # canvas COMEÇA como blur — nunca Image.new vazio
-
-    # ── CAMADA 2: Foto principal proporcional (fit_width, sem corte vertical) ─
+    # ── CAMADA 2: Foto principal — fit_width + fade fixo nos últimos 200px ──
+    # fit_width: preserva todas as pessoas sem corte lateral
+    # fade fixo (200px): suaviza borda inferior sem expor grande área de blur
     photo = src.copy()
     scale2 = W / photo.width
     pw = W
@@ -117,27 +110,39 @@ def generate_ig_image(
     photo = ImageEnhance.Contrast(photo).enhance(1.15)
     photo = ImageEnhance.Color(photo).enhance(1.20)
     photo = ImageEnhance.Sharpness(photo).enhance(1.10)
-    canvas.alpha_composite(photo, (0, 0))  # ancora no topo
+
+    # Fade nos últimos 200px da foto (pixels fixos, independente da altura)
+    FADE_PX = 200
+    fade_start = max(0, ph - FADE_PX)
+    mask = Image.new("L", (pw, ph), 255)
+    draw_mask = ImageDraw.Draw(mask)
+    for y in range(fade_start, ph):
+        alpha_val = int(255 * (1 - (y - fade_start) / FADE_PX))
+        draw_mask.line([(0, y), (pw, y)], fill=alpha_val)
+    photo.putalpha(mask)
+
+    canvas.alpha_composite(photo, (0, 0))
 
     # ── CAMADA 3: Degradê overlay (nunca sólido, alpha máx 210) ───────────────
     grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     dg   = ImageDraw.Draw(grad)
-    S, M, E = 580, 810, H
+    S, M, E = 420, 850, H  # transição muito mais longa e suave
 
     for y in range(H):
         if y < S:
             dg.line([(0, y), (W, y)], fill=(0, 0, 0, 0))
         elif y < M:
             p = (y - S) / (M - S)
-            r = int(230 * p)
-            b = int(126 * p)
-            a = int(185 * p)
+            p_ease = p * p  # ease-in: início muito suave
+            r = int(230 * p_ease)
+            b = int(126 * p_ease)
+            a = int(175 * p_ease)
             dg.line([(0, y), (W, y)], fill=(r, 0, b, a))
         else:
             p = min(1.0, (y - M) / (E - M))
             r = int(230 - (230 - 59) * p)
-            b = int(126 + (95 - 126) * p)
-            a = int(185 + (210 - 185) * p)
+            b = int(126 + (95  - 126) * p)
+            a = int(175 + (210 - 175) * p)
             dg.line([(0, y), (W, y)], fill=(r, 0, b, a))
 
     canvas.alpha_composite(grad)
