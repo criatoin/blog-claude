@@ -1,11 +1,11 @@
 """
 instagram_image.py — Gera arte para Instagram via composição Pillow.
 
-Template +blog — 4 camadas:
-  1. Background full-canvas desfocado (ImageOps.fit + GaussianBlur)
-  2. Foto principal fit_width=1080 com fade inferior proporcional
-  3. Gradiente overlay (alpha máximo 210, nunca sólido)
-  4. Badge + título + subtítulo + logo
+Template +blog — padrão Ameriafro — 4 camadas:
+  1. Foto full-bleed (ImageOps.fit cover, contrast/color/sharpness)
+  2. Degradê overlay magenta→roxo (alpha máx 210, nunca 255)
+  3. Textos: tag categoria + título + linha de apoio
+  4. Logo centralizado no rodapé
 
 Formato: 1080×1350px WebP, <1MB
 
@@ -23,11 +23,12 @@ Saída JSON: {"path": ".tmp/slug_ig.webp", "size_kb": 420}
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 load_dotenv()
 
@@ -36,15 +37,47 @@ MAX_SIZE_BYTES = 1 * 1024 * 1024
 QUALITY_STEPS  = [85, 75, 65, 55]
 
 PROJECT_DIR = Path(__file__).parent.parent
-FONT_BOLD   = str(PROJECT_DIR / "assets" / "fonts" / "Poppins-Bold.ttf")
 LOGO_PATH   = str(PROJECT_DIR / "assets" / "logo" / "Logo +blog rosa.png")
 
+# Busca de fontes: Poppins-Bold local primeiro, depois fallbacks do sistema
+_FONT_SEARCH_DIRS = [
+    str(PROJECT_DIR / "assets" / "fonts"),
+    "/usr/share/fonts",
+    "/usr/share/fonts/truetype",
+    "/usr/share/fonts/truetype/dejavu",
+    "/System/Library/Fonts",
+]
+_FONT_CANDIDATES = {
+    "black":   ["Poppins-Bold.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf"],
+    "bold":    ["Poppins-Bold.ttf", "DejaVuSans-Bold.ttf", "arialbd.ttf"],
+    "regular": ["Poppins-Bold.ttf", "DejaVuSans.ttf", "arial.ttf"],
+}
 
-def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    try:
-        return ImageFont.truetype(FONT_BOLD, size)
-    except Exception:
-        return ImageFont.load_default()
+
+def _load_font(size: int, weight: str = "regular") -> ImageFont.FreeTypeFont:
+    for name in _FONT_CANDIDATES.get(weight, _FONT_CANDIDATES["regular"]):
+        for base in _FONT_SEARCH_DIRS:
+            path = os.path.join(base, name)
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def _quebrar_linhas(texto: str, font: ImageFont.FreeTypeFont, max_w: int, draw: ImageDraw.ImageDraw) -> list[str]:
+    words = texto.split()
+    lines: list[str] = []
+    line = ""
+    for w in words:
+        test = (line + " " + w).strip()
+        if draw.textlength(test, font=font) <= max_w:
+            line = test
+        else:
+            if line:
+                lines.append(line)
+            line = w
+    if line:
+        lines.append(line)
+    return lines
 
 
 def generate_ig_image(
@@ -60,90 +93,75 @@ def generate_ig_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{slug}_ig.webp"
 
-    font_badge  = _load_font(26)
-    font_titulo = _load_font(86)
-    font_sub    = _load_font(36)
-
-    # === CAMADA 1: Background full canvas desfocado ===
+    # ── CAMADA 1: Foto full-bleed ──────────────────────────────────────────────
     bg = Image.open(cover_path).convert("RGBA")
-    bg = ImageOps.fit(bg, (W, H), method=Image.LANCZOS)
-    bg = bg.filter(ImageFilter.GaussianBlur(radius=18))
-    dark = Image.new("RGBA", (W, H), (0, 0, 0, 65))
-    bg = Image.alpha_composite(bg, dark)
+    # centering=(0.5, 0.3): ancora no terço superior, preserva rostos
+    bg = ImageOps.fit(bg, (W, H), method=Image.LANCZOS, centering=(0.5, 0.3))
+    bg = ImageEnhance.Contrast(bg).enhance(1.15)
+    bg = ImageEnhance.Color(bg).enhance(1.20)
+    bg = ImageEnhance.Sharpness(bg).enhance(1.10)
     canvas = bg.copy()
 
-    # === CAMADA 2: Foto principal com fade inferior ===
-    photo = Image.open(cover_path).convert("RGBA")
-    ratio = W / photo.width
-    ph = int(photo.height * ratio)
-    photo = photo.resize((W, ph), Image.LANCZOS)
-
-    mask = Image.new("L", (W, ph), 255)
-    fade_start = int(ph * 0.62)
-    for y in range(fade_start, ph):
-        v = int(255 * (1 - (y - fade_start) / (ph - fade_start)))
-        ImageDraw.Draw(mask).line([(0, y), (W, y)], fill=v)
-    photo.putalpha(mask)
-    canvas.alpha_composite(photo, (0, 0))
-
-    # === CAMADA 3: Degradê overlay (nunca sólido, alpha máximo 210) ===
+    # ── CAMADA 2: Degradê overlay (nunca sólido, alpha máx 210) ───────────────
     grad = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(grad)
+    dg   = ImageDraw.Draw(grad)
+    S, M, E = 580, 810, H   # start, strong, end
+
     for y in range(H):
-        if y < 420:
-            draw.line([(0, y), (W, y)], fill=(0, 0, 0, 0))
-        elif y < 660:
-            p = (y - 420) / (660 - 420)
-            a = int(155 * p)
-            r = int(130 * p)
-            b = int(115 * p)
-            draw.line([(0, y), (W, y)], fill=(r, 0, b, a))
+        if y < S:
+            dg.line([(0, y), (W, y)], fill=(0, 0, 0, 0))
+        elif y < M:
+            p = (y - S) / (M - S)
+            r = int(230 * p)
+            b = int(126 * p)
+            a = int(185 * p)
+            dg.line([(0, y), (W, y)], fill=(r, 0, b, a))
         else:
-            p = min(1.0, (y - 660) / (H - 660))
-            a = int(155 + 55 * p)   # máximo 210
-            r = int(100 - 35 * p)
-            b = int(130 + 20 * p)
-            draw.line([(0, y), (W, y)], fill=(r, 0, b, a))
+            p = min(1.0, (y - M) / (E - M))
+            r = int(230 - (230 - 59) * p)   # 230 → 59
+            b = int(126 + (95 - 126) * p)   # 126 → 95
+            a = int(185 + (210 - 185) * p)  # 185 → 210 (nunca 255)
+            dg.line([(0, y), (W, y)], fill=(r, 0, b, a))
+
     canvas.alpha_composite(grad)
 
-    # === CAMADA 4: Texto e logo ===
+    # ── CAMADA 3: Textos ───────────────────────────────────────────────────────
     d = ImageDraw.Draw(canvas)
 
-    # Badge amarelo
-    bx, by = 70, 648
-    bbox = d.textbbox((bx, by), category.upper(), font=font_badge)
-    pad = 12
-    d.rounded_rectangle(
-        [bbox[0] - pad, bbox[1] - pad // 2, bbox[2] + pad, bbox[3] + pad // 2],
-        radius=6,
-        fill=(200, 230, 0),
-    )
-    d.text((bx, by), category.upper(), font=font_badge, fill=(0, 0, 0))
+    # Tag de categoria
+    ft     = _load_font(28, "bold")
+    cat_up = category.upper()
+    bb     = d.textbbox((0, 0), cat_up, font=ft)
+    tw     = bb[2] - bb[0]
+    th     = bb[3] - bb[1]
+    TX, TY, PW, PH = 68, 660, 32, 14
+    rect = [TX, TY, TX + tw + PW * 2, TY + th + PH * 2]
+    d.rounded_rectangle(rect, radius=8, fill=(221, 230, 0))
+    d.text((TX + PW, TY + PH), cat_up, font=ft, fill=(0, 0, 0))
+    tag_bottom = rect[3]
 
-    # Título com quebra automática
-    ty = by + 60
-    words = title.split()
-    lines: list[str] = []
-    line = ""
-    for w in words:
-        test = (line + " " + w).strip()
-        if d.textlength(test, font=font_titulo) < 940:
-            line = test
-        else:
-            lines.append(line)
-            line = w
-    lines.append(line)
-    for l in lines[:3]:
-        d.text((70, ty), l, font=font_titulo, fill=(255, 255, 255))
-        ty += int(font_titulo.size * 1.1)
+    # Título — tamanho adaptativo pela quantidade de caracteres
+    n = len(title)
+    fs = 92 if n <= 12 else (82 if n <= 18 else 72)
+    fti    = _load_font(fs, "black")
+    linhas = _quebrar_linhas(title, fti, 940, d)
+    ty     = tag_bottom + 22
+    for linha in linhas[:3]:
+        d.text((68, ty), linha, font=fti, fill=(255, 255, 255))
+        ty += int(fti.size * 1.08)
 
-    # Subtítulo
+    # Linha de apoio
     if subtitle:
-        d.text((70, ty + 18), subtitle, font=font_sub, fill=(230, 230, 230, 220))
+        fa = _load_font(38, "regular")
+        ay = ty + 32
+        for linha in _quebrar_linhas(subtitle, fa, 940, d)[:2]:
+            d.text((68, ay), linha, font=fa, fill=(255, 255, 255))
+            ay += int(fa.size * 1.35)
 
-    # Logo — remove fundo branco antes de compor
+    # ── CAMADA 4: Logo no rodapé ───────────────────────────────────────────────
     try:
         logo = Image.open(LOGO_PATH).convert("RGBA")
+        # Remove fundo branco/quase-branco
         data = logo.getdata()
         logo.putdata([
             (r, g, b, 0) if r > 230 and g > 230 and b > 230 else (r, g, b, a)
@@ -152,16 +170,16 @@ def generate_ig_image(
         bbox = logo.getbbox()
         if bbox:
             logo = logo.crop(bbox)
-        lw = 240
-        lh = int(logo.height * lw / logo.width)
-        logo = logo.resize((lw, lh), Image.LANCZOS)
-        lx = (W - lw) // 2
-        ly = H - lh - 65
-        canvas.alpha_composite(logo, (lx, ly))
+        LW   = 300
+        LH   = int(logo.height * LW / logo.width)
+        logo = logo.resize((LW, LH), Image.LANCZOS)
+        LX   = (W - LW) // 2
+        LY   = H - LH - 58
+        canvas.alpha_composite(logo, (LX, LY))
     except Exception:
         pass
 
-    # Salva WebP dentro do limite de 1MB
+    # ── Salva WebP dentro do limite de 1MB ────────────────────────────────────
     img = canvas.convert("RGB")
     for quality in QUALITY_STEPS:
         img.save(str(dest), format="WEBP", quality=quality, method=6)
@@ -176,14 +194,14 @@ def generate_ig_image(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gera arte Instagram 1080x1350 WebP")
-    parser.add_argument("--cover",        required=True)
-    parser.add_argument("--slug",         required=True)
-    parser.add_argument("--title",        required=True)
-    parser.add_argument("--category",     default="Eventos")
-    parser.add_argument("--output-dir",   default=".tmp")
-    parser.add_argument("--art-title",    default="", help="Substitui --title como título da arte")
-    parser.add_argument("--art-subtitle", default="", help="Linha de apoio da arte")
-    parser.add_argument("--model",        default="", help="(ignorado — compatibilidade)")
+    parser.add_argument("--cover",         required=True)
+    parser.add_argument("--slug",          required=True)
+    parser.add_argument("--title",         required=True)
+    parser.add_argument("--category",      default="Eventos")
+    parser.add_argument("--output-dir",    default=".tmp")
+    parser.add_argument("--art-title",     default="", help="Substitui --title como título da arte")
+    parser.add_argument("--art-subtitle",  default="", help="Linha de apoio da arte")
+    parser.add_argument("--model",         default="", help="(ignorado — compatibilidade)")
     args = parser.parse_args()
 
     art_title = args.art_title if args.art_title else args.title
