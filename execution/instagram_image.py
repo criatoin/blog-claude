@@ -169,7 +169,7 @@ def generate_ig_image(
     tag_bottom = rect[3]
 
     # Título — quebra semântica por contagem de palavras + tamanho adaptativo
-    words = title.split()
+    words = title.split()[:6]  # máximo 6 palavras — regra do template
     n = len(words)
 
     if n <= 2:
