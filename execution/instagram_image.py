@@ -224,7 +224,7 @@ def generate_ig_image(
         bbox = logo.getbbox()
         if bbox:
             logo = logo.crop(bbox)
-        LW   = 300
+        LW   = 240
         LH   = int(logo.height * LW / logo.width)
         logo = logo.resize((LW, LH), Image.LANCZOS)
         LX   = (W - LW) // 2
