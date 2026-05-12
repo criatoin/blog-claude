@@ -87,6 +87,12 @@ def generate_ig_image(
     output_dir: str = ".tmp",
     subtitle: str = "",
 ) -> dict:
+    if len(title.split()) < 4:
+        raise ValueError(
+            f"Título muito curto: '{title}'. "
+            f"Use entre 4 e 6 palavras para o template funcionar corretamente."
+        )
+
     W, H = IG_W, IG_H
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +192,7 @@ def generate_ig_image(
     fonte_ok = None
     while tamanho >= 56:
         fti = _load_font(tamanho, "black")
-        if max(d.textlength(l, font=fti) for l in linhas) <= 940:
+        if max(d.textlength(l, font=fti) for l in linhas) <= 944:
             fonte_ok = fti
             break
         tamanho -= 2
