@@ -148,6 +148,32 @@ def llm_call_json(system: str, user: str, model: str | None = None) -> dict | li
 
     try:
         return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: substitui quebras de linha literais dentro de strings JSON por \n
+    import re as _re
+    def _escape_newlines_in_strings(s: str) -> str:
+        """Substitui \n literais dentro de strings JSON por \\n."""
+        result = []
+        in_string = False
+        i = 0
+        while i < len(s):
+            ch = s[i]
+            if ch == '"' and (i == 0 or s[i-1] != "\\"):
+                in_string = not in_string
+                result.append(ch)
+            elif in_string and ch == "\n":
+                result.append("\\n")
+            elif in_string and ch == "\r":
+                result.append("\\r")
+            else:
+                result.append(ch)
+            i += 1
+        return "".join(result)
+
+    try:
+        return json.loads(_escape_newlines_in_strings(text))
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Resposta não é JSON válido: {e}\nTexto: {text[:500]}")
 

@@ -609,8 +609,14 @@ Retorne APENAS um objeto JSON válido:
         return "\n".join(linhas)
 
     def _blocos(texto: str) -> int:
-        """Conta blocos/parágrafos separados por linha em branco."""
-        return len([b for b in texto.split("\n\n") if b.strip()])
+        """Conta blocos separados por linha em branco ou por \n simples entre frases."""
+        # Normaliza \n escapados (DeepSeek às vezes entrega \\n dentro de JSON)
+        texto = texto.replace("\\n", "\n")
+        # Tenta split por parágrafo duplo; se só tiver 1, tenta por \n simples
+        por_duplo = [b for b in texto.split("\n\n") if b.strip()]
+        if len(por_duplo) >= 2:
+            return len(por_duplo)
+        return len([b for b in texto.split("\n") if b.strip()])
 
     _ABERTURAS_ARTIFICIAIS = [
         "voando alto", "magia da leitura", "experiência encantadora",
@@ -641,9 +647,11 @@ Retorne APENAS um objeto JSON válido:
         if not (isinstance(result, dict) and result.get("legenda_curta")):
             return _FALLBACK
 
-        # Limpeza defensiva de hashtags
+        # Normaliza quebras de linha e remove hashtags
         for campo in ("legenda_curta", "legenda_contexto"):
             if campo in result:
+                # DeepSeek às vezes entrega \n escapado dentro da string JSON
+                result[campo] = result[campo].replace("\\n", "\n")
                 result[campo] = _limpar_hashtags(result[campo])
         result.pop("hashtags", None)
 
@@ -665,6 +673,7 @@ Retorne APENAS um objeto JSON válido:
                 if isinstance(result2, dict) and result2.get("legenda_curta"):
                     for campo in ("legenda_curta", "legenda_contexto"):
                         if campo in result2:
+                            result2[campo] = result2[campo].replace("\\n", "\n")
                             result2[campo] = _limpar_hashtags(result2[campo])
                     result2.pop("hashtags", None)
                     erros2 = _valida_legenda(result2)
