@@ -201,9 +201,10 @@ Retorne APENAS um objeto JSON válido (sem markdown):
   "resumo_telegram": "resumo de 2-3 frases para o editor no Telegram",
   "html": "<p>conteúdo completo...</p>",
   "texto_arte": {{
-    "titulo_principal": "até 6 palavras — força visual, sem ponto final",
-    "linha_apoio": "até 12 palavras — contextualiza sem virar parágrafo",
-    "badge": "1 ou 2 palavras em maiúsculas",
+    "template": "ameriafro_v3",
+    "badge": "1 ou 2 palavras em maiúsculas — ex: CULTURA, LITERATURA, MÚSICA",
+    "titulo_principal": "até 6 palavras — manchete visual, sem ponto final, sem hashtag",
+    "linha_apoio": "até 12 palavras — contextualiza sem virar parágrafo, sem hashtag",
     "alerta": "vazio se OK, ou aviso se faltou info para chamada segura"
   }},
   "creditos_wordpress": {{
@@ -216,17 +217,17 @@ Retorne APENAS um objeto JSON válido (sem markdown):
 ════════════════════════════════
 REGRAS PARA texto_arte
 ════════════════════════════════
-- titulo_principal: máx 6 palavras, SEM ponto final
+- badge: 1 ou 2 palavras em maiúsculas (ex: "LITERATURA", "MÚSICA", "CULTURA")
+- titulo_principal: máx 6 palavras, SEM ponto final, SEM hashtags (#)
 - titulo_principal NÃO pode ser igual ao titulo_site
 - titulo_principal NÃO pode conter: "imperdível", "confira", "não perca", "vem aí", "promete", "programação especial", "acontece em"
-- linha_apoio: máx 12 palavras, sem ponto final, não repetir o título
-- badge: 1 ou 2 palavras (ex: "LITERATURA", "MÚSICA", "CULTURA")
+- linha_apoio: máx 12 palavras, sem ponto final, sem hashtag, não repetir o título
+- NUNCA usar hashtags (#) em nenhum campo de texto_arte
 - só usar "gratuito" ou "grátis" se gratuito=true nos fatos extraídos
 - só mencionar cidade, data ou local se estiverem nos fatos extraídos
-- titulo_principal deve ter força visual — prefira:
-    "Histórias que encantam", "Cultura preta na Estação", "Americana recebe Sarau Ameriafro"
-  em vez de:
-    "Evento acontece em Santa Bárbara", "Projeto leva magia da leitura para crianças"
+- titulo_principal deve parecer manchete de post social, não frase de release:
+    CERTO: "Histórias que encantam", "Cultura preta na Estação", "Americana recebe Sarau Ameriafro"
+    ERRADO: "Evento acontece em Santa Bárbara", "Projeto leva magia da leitura para crianças"
 
 ════════════════════════════════
 REGRAS DE CRÉDITO (campo creditos_wordpress)
@@ -276,10 +277,9 @@ def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) 
     from llm_call import llm_call_json
 
     _FALLBACK = {
-        "legenda_curta": "",
+        "legenda_curta": "Tem programação cultural chegando por aqui.\n\nA gente reuniu no +blog as informações confirmadas para você entender melhor o que vai rolar e se programar.\n\nVale salvar e mandar para quem curte esse tipo de rolê.",
         "legenda_contexto": "",
         "cta_sugerido": "",
-        "hashtags": ["#maisblog", "#americana", "#culturaameri"],
     }
 
     arte = arte_instagram or {}
@@ -293,44 +293,64 @@ def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) 
 
 Você é social media do +blog. Crie duas versões de legenda para Instagram.
 
-ESTRUTURA DE CADA LEGENDA:
-1. Gancho (1 linha) — dado concreto que prende antes do "ver mais". SEM "Vem aí", "Confira", "Não perca".
-2. Corpo — 2 parágrafos curtos com detalhes úteis. Tom de amigo dando uma dica.
-3. CTA — variado conforme o conteúdo (não fixo em todos os posts).
-4. Hashtags — máx 5, específicas e regionais.
+A legenda precisa soar como Instagram de verdade — humana, leve, regional e natural.
+NÃO deve parecer release. NÃO deve parecer resumo frio. NÃO deve ser institucional.
+NÃO usar hashtags em hipótese alguma.
+
+ESTRUTURA:
+1. Abertura informativa e natural (1-2 frases — dado concreto, não "Vem aí" nem "Confira")
+2. Desenvolvimento com o que vai acontecer (detalhes confirmados)
+3. Frase que convide a salvar, marcar alguém, viver ou acompanhar
+4. CTA final orgânico e variado conforme o conteúdo
 
 ESCOLHA DE CTA conforme o conteúdo:
-- evento com data confirmada → "Salva pra lembrar desse rolê."
-- evento cultural aberto → "Marca quem você levaria."
-- programação com mais detalhes → "A gente reuniu tudo no +blog pra você se programar."
-- conteúdo de serviço → "Todas as informações estão no link da bio."
-- conteúdo inspirador → "Já manda pra quem precisa ver isso."
+- evento com data confirmada → sugerir salvar na agenda
+- evento cultural → sugerir chamar ou marcar alguém
+- programação com mais detalhes → sugerir acessar o +blog
+- conteúdo inspirador → sugerir mandar pra quem precisa ver
+
+USE COMO REFERÊNCIA DE ESTILO (não copie, inspire-se no tom e ritmo):
+"O 1º Sarau Ameriafro chega na Estação Cultura no dia 16 de maio, com programação gratuita das 14h às 21h
+
+Vai ter poesia, hip hop, capoeira, dança, grafite, maracatu, música, artes visuais, batalha de rima e gente da região ocupando a cidade com cultura afro-brasileira
+
+É o tipo de evento pra salvar na agenda, chamar alguém e viver de perto
+
+Quem você levaria nesse rolê? Marca aqui
+
+No +blog tem a programação completa com horários e atrações pra você se organizar antes de ir"
 
 REGRAS ABSOLUTAS:
+- NUNCA usar hashtags (#) — nem uma sequer
 - não inventar data, horário, local, cidade, valor ou gratuidade
 - não repetir mecanicamente o texto da arte
 - não usar "imperdível"
 - não usar linguagem institucional
-- máx 5 hashtags, específicas (não "#cultura" solto)
 - sem créditos de texto ou fotos
 - sem mencionar assessoria ou fonte
+- frases fluidas, com ritmo, tom próximo e regional
 
 Retorne APENAS um objeto JSON válido:
 {{
-  "legenda_curta": "versão direta e objetiva — gancho + corpo + cta + hashtags",
-  "legenda_contexto": "versão alternativa com mais contexto — para o editor escolher",
-  "cta_sugerido": "o CTA escolhido",
-  "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#maisblog"]
+  "legenda_curta": "versão direta — gancho + desenvolvimento + convite + CTA. SEM hashtags.",
+  "legenda_contexto": "versão alternativa com mais contexto — para o editor escolher. SEM hashtags.",
+  "cta_sugerido": "o CTA escolhido"
 }}"""
 
     user_parts = [f"Fatos confirmados:\n{fatos_str}", f"Resumo da matéria:\n{resumo[:500]}"]
     if arte_str:
-        user_parts.append(f"Texto usado na arte (não repetir mecanicamente):\n{arte_str}")
+        user_parts.append(f"Texto da arte (não repetir mecanicamente):\n{arte_str}")
     user = "\n\n".join(user_parts)
 
     try:
         result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
         if isinstance(result, dict) and result.get("legenda_curta"):
+            # Remove hashtags residuais linha a linha
+            for campo in ("legenda_curta", "legenda_contexto"):
+                if campo in result:
+                    linhas = [l for l in result[campo].splitlines() if not l.strip().startswith("#")]
+                    result[campo] = "\n".join(linhas)
+            result.pop("hashtags", None)  # remove se LLM devolver mesmo proibido
             return result
         return _FALLBACK
     except Exception as e:
@@ -533,3 +553,118 @@ def validar_arte(arte: dict, fatos: dict, release_titulo: str = "") -> tuple[dic
         badge = fatos.get("categoria_editorial", "CULTURA").upper()
 
     return {**arte, "titulo_principal": titulo, "linha_apoio": linha, "badge": badge}, alertas
+
+
+def _erros_criticos_arte(arte: dict, fatos: dict, release_titulo: str = "") -> list[str]:
+    """
+    Retorna lista de erros críticos que justificam retentativa ao LLM.
+    Erros críticos: campo vazio, palavra proibida, gratuidade não confirmada.
+    Erros menores (longo, ponto final) são corrigidos deterministicamente.
+    """
+    erros = []
+    titulo = arte.get("titulo_principal", "").strip()
+    linha  = arte.get("linha_apoio", "").strip()
+
+    if not titulo:
+        erros.append("titulo_principal está vazio")
+    else:
+        titulo_lower = titulo.lower()
+        for proibida in _PALAVRAS_PROIBIDAS_ARTE:
+            if proibida in titulo_lower:
+                erros.append(f"titulo_principal contém '{proibida}' — proibido")
+                break
+        if "#" in titulo:
+            erros.append("titulo_principal contém hashtag — proibido")
+        gratuito_confirmado = fatos.get("gratuito") is True
+        if not gratuito_confirmado:
+            for termo in ("gratuito", "grátis", "entrada franca"):
+                if termo in titulo_lower:
+                    erros.append(f"titulo_principal usa '{termo}' sem gratuito confirmado")
+                    break
+        if release_titulo and titulo.lower() == release_titulo.lower():
+            erros.append("titulo_principal é igual ao título do release")
+
+    if not linha:
+        erros.append("linha_apoio está vazia")
+    elif "#" in linha:
+        erros.append("linha_apoio contém hashtag — proibido")
+
+    if not arte.get("badge", "").strip():
+        erros.append("badge está vazio")
+
+    return erros
+
+
+def gerar_arte_com_validacao(
+    release_text: str,
+    fatos: dict,
+    avaliacao: dict,
+    sender: str = "",
+    release_titulo: str = "",
+) -> dict:
+    """
+    Gera conteúdo editorial com loop de validação para texto_arte.
+    Tenta até 2 vezes: na segunda, passa os erros como feedback explícito ao LLM.
+    Se ambas falharem, aplica fallback determinístico.
+    Retorna o dict completo de gerar_conteudo com texto_arte validado.
+    """
+    from llm_call import llm_call_json
+
+    # Tentativa 1: geração normal
+    post = gerar_conteudo(release_text, fatos, avaliacao, sender=sender)
+    arte = post.get("texto_arte", {})
+    erros = _erros_criticos_arte(arte, fatos, release_titulo)
+
+    if erros:
+        print(f"[editorial] texto_arte com {len(erros)} erro(s) crítico(s): {erros}", file=sys.stderr)
+        print(f"[editorial] Tentativa 2 com feedback explícito...", file=sys.stderr)
+
+        # Tentativa 2: inclui feedback dos erros no prompt
+        angulo = avaliacao.get("angulo_recomendado", "")
+        angulo_instrucao = f"ÂNGULO EDITORIAL: {angulo}\n\n" if angulo else ""
+        feedback = "\n".join(f"- {e}" for e in erros)
+
+        system_retry = f"""{angulo_instrucao}{_VOZ_EDITORIAL}
+
+Na tentativa anterior, o campo texto_arte falhou com estes erros:
+{feedback}
+
+Corrija APENAS o campo texto_arte. Os outros campos podem ser os mesmos.
+
+Regras do texto_arte:
+- badge: 1 ou 2 palavras em maiúsculas, sem hashtag
+- titulo_principal: máx 6 palavras, sem ponto final, sem hashtag, sem palavras proibidas
+- linha_apoio: máx 12 palavras, sem hashtag
+- NUNCA usar hashtags em nenhum campo
+- só mencionar gratuidade se gratuito=true nos fatos
+
+Fatos: {json.dumps(fatos, ensure_ascii=False)}
+
+Retorne APENAS o objeto texto_arte corrigido em JSON:
+{{
+  "template": "ameriafro_v3",
+  "badge": "",
+  "titulo_principal": "",
+  "linha_apoio": "",
+  "alerta": ""
+}}"""
+
+        try:
+            arte_retry = llm_call_json(system=system_retry, user=f"Release:\n{release_text[:3000]}", model=EDITORIAL_MODEL)
+            if isinstance(arte_retry, dict) and arte_retry.get("titulo_principal"):
+                erros2 = _erros_criticos_arte(arte_retry, fatos, release_titulo)
+                if not erros2:
+                    post["texto_arte"] = arte_retry
+                    print(f"[editorial] texto_arte corrigido na tentativa 2.", file=sys.stderr)
+                    arte = arte_retry
+                else:
+                    print(f"[editorial] Tentativa 2 ainda com erros: {erros2} — aplicando fallback.", file=sys.stderr)
+        except Exception as e:
+            print(f"[editorial] Tentativa 2 falhou ({e}) — aplicando fallback.", file=sys.stderr)
+
+    # Fallback determinístico se ainda houver erros
+    arte_final, alertas = validar_arte(post.get("texto_arte", {}), fatos, release_titulo)
+    if alertas:
+        print(f"[editorial] validar_arte aplicou correções: {alertas}", file=sys.stderr)
+    post["texto_arte"] = arte_final
+    return post

@@ -262,8 +262,8 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | Non
 def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
     """Processa um email pelo pipeline completo. Retorna dict com resultado."""
     from editorial import (
-        extrair_fatos, avaliar_relevancia, gerar_conteudo,
-        gerar_legenda, validar_fatos, resumo_telegram, validar_arte,
+        extrair_fatos, avaliar_relevancia, gerar_arte_com_validacao,
+        gerar_legenda, validar_fatos, resumo_telegram,
     )
 
     email_id = email.get("id", "?")
@@ -309,9 +309,9 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
             ])
         return {"email_id": email_id, "relevante": False, "motivo": motivo}
 
-    # 3. Gera conteúdo editorial
+    # 3. Gera conteúdo editorial com validação e retentativa automática
     print(f"[run_releases]   3/6 Gerando conteúdo...", file=sys.stderr)
-    post = gerar_conteudo(body_text, fatos, avaliacao, sender=sender)
+    post = gerar_arte_com_validacao(body_text, fatos, avaliacao, sender=sender, release_titulo=subject)
 
     titulo = post.get("titulo_site") or subject[:65]
     slug = post.get("slug") or "post-sem-slug"
@@ -324,13 +324,6 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     creditos = post.get("creditos_wordpress", {})
 
     print(f"[run_releases]   Título: {titulo}", file=sys.stderr)
-
-    # Valida e corrige texto da arte antes de renderizar
-    arte_raw = post.get("texto_arte", {})
-    arte_validada, alertas_arte = validar_arte(arte_raw, fatos, subject)
-    if alertas_arte:
-        print(f"[run_releases]   Arte: {len(alertas_arte)} alerta(s): {alertas_arte}", file=sys.stderr)
-    post["texto_arte"] = arte_validada
 
     if dry_run:
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}

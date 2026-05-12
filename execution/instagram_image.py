@@ -38,7 +38,7 @@ QUALITY_STEPS = [85, 75, 65, 55]
 
 PROJECT_DIR = Path(__file__).parent.parent
 FONT_PATH = str(PROJECT_DIR / "assets" / "fonts" / "Poppins-Bold.ttf")
-LOGO_FLAT_PATH = str(PROJECT_DIR / "logos" / "Logo +blog roxo.png.png")
+LOGO_FLAT_PATH = str(PROJECT_DIR / "assets" / "logo" / "Logo +blog rosa.png")
 
 BADGE_COLOR = "#C8E600"
 BADGE_TEXT_COLOR = "#1A1A1A"
@@ -61,101 +61,89 @@ BADGE_TITLE_GAP = 18
 TITLE_SUB_GAP   = 14
 
 
-def _detect_subject_position(img: Image.Image) -> tuple[str, str]:
+def _build_photo_background(img: Image.Image, w: int, h: int) -> tuple[Image.Image, int]:
     """
-    Usa Gemini Vision para detectar onde estão os sujeitos principais.
-    Retorna (horizontal, vertical): horizontal ∈ {left, center, right, full}
-                                    vertical   ∈ {top, center, bottom, full}
-    Fallback: ("center", "center") em caso de erro ou sem API key.
+    Constrói o fundo fotográfico para o canvas.
+    Retorna (imagem_rgb, gradient_start_y).
+
+    Estratégia por proporção da foto original:
+    - Vertical ou quadrada (ratio ≤ 1.1): fit-and-crop central conservador.
+      Gradiente começa em GRADIENT_START_FRAC do canvas.
+    - Horizontal (ratio > 1.1): layout híbrido.
+      Fundo borrado + foto principal posicionada preservando todos os sujeitos.
+      Gradiente começa no terço inferior da foto principal (dentro dela).
     """
-    import os
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return "center", "center"
-    try:
-        from google import genai
-        from google.genai import types
-        import io
-
-        client = genai.Client(api_key=api_key)
-        buf = io.BytesIO()
-        img.convert("RGB").save(buf, format="JPEG", quality=75)
-        img_bytes = buf.getvalue()
-
-        prompt = (
-            "Look at this image and identify the main subjects (people, key objects, or focal point).\n"
-            "Answer ONLY with two words separated by a comma:\n"
-            "  Word 1 — horizontal position: left | center | right | full\n"
-            "  Word 2 — vertical position:   top  | center | bottom | full\n"
-            "Rules:\n"
-            "- 'left' if subjects occupy mainly the left third\n"
-            "- 'right' if subjects occupy mainly the right third\n"
-            "- 'center' if subjects are in the middle third\n"
-            "- 'full' if subjects span the full width/height\n"
-            "Example answers: 'left, center'  |  'center, top'  |  'full, full'\n"
-            "Answer ONLY those two words, nothing else."
-        )
-
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
-                prompt,
-                types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
-            ],
-        )
-        parts = [p.strip().lower() for p in response.text.strip().split(",")]
-        h_pos = parts[0] if parts[0] in ("left", "center", "right", "full") else "center"
-        v_pos = parts[1] if len(parts) > 1 and parts[1] in ("top", "center", "bottom", "full") else "center"
-        print(f"[instagram_image] Posição dos sujeitos: h={h_pos}, v={v_pos}", file=sys.stderr)
-        return h_pos, v_pos
-    except Exception as e:
-        print(f"[instagram_image] Detecção de posição falhou ({e}), usando centro.", file=sys.stderr)
-        return "center", "center"
-
-
-def _crop_offset(total: int, crop: int, position: str, side_start: str, side_end: str) -> int:
-    """
-    Calcula o offset de crop baseado na posição do sujeito.
-    position: 'left'/'top', 'center', 'right'/'bottom', 'full'
-    """
-    slack = total - crop
-    if slack <= 0:
-        return 0
-    if position in (side_start, "full"):
-        return max(0, slack // 6)          # ancora próximo ao início, com pequena margem
-    elif position == side_end:
-        return min(slack, slack - slack // 6)  # ancora próximo ao fim
-    else:
-        return slack // 2                   # centro (comportamento original)
-
-
-def _smart_crop(img: Image.Image, w: int, h: int) -> Image.Image:
+    from PIL import ImageFilter, ImageEnhance
     src_w, src_h = img.size
-    ratio = w / h
     src_ratio = src_w / src_h
 
-    # Detecta posição dos sujeitos antes de redimensionar (mais rápido com imagem menor)
-    h_pos, v_pos = _detect_subject_position(img)
-
-    if src_ratio > ratio:
-        new_h = h
-        new_w = int(src_w * h / src_h)
-    else:
+    if src_ratio <= 1.1:
+        # Foto vertical/quadrada: crop central conservador
         new_w = w
         new_h = int(src_h * w / src_w)
-    img = img.resize((new_w, new_h), Image.LANCZOS)
+        if new_h < h:
+            new_h = h
+            new_w = int(src_w * h / src_h)
+        resized = img.resize((new_w, new_h), Image.LANCZOS)
+        left = (new_w - w) // 2
+        top  = max(0, int((new_h - h) * 0.35))
+        cropped = resized.crop((left, top, left + w, top + h))
+        gradient_start_y = int(h * GRADIENT_START_FRAC)
+        return cropped, gradient_start_y
 
-    left = _crop_offset(new_w, w, h_pos, "left", "right")
-    top  = _crop_offset(new_h, h, v_pos, "top",  "bottom")
-    return img.crop((left, top, left + w, top + h))
+    else:
+        # Foto horizontal: layout híbrido fundo borrado + foto principal
+        print(f"[instagram_image] Foto horizontal ({src_ratio:.2f}) — layout híbrido.", file=sys.stderr)
+
+        # Fundo: zoom + blur forte + escurecimento
+        scale_bg = max(w / src_w, h / src_h) * 1.05
+        bg_w, bg_h = int(src_w * scale_bg), int(src_h * scale_bg)
+        bg = img.resize((bg_w, bg_h), Image.LANCZOS)
+        bx, by = (bg_w - w) // 2, (bg_h - h) // 2
+        bg = bg.crop((bx, by, bx + w, by + h))
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
+        bg = ImageEnhance.Brightness(bg).enhance(0.40)
+
+        # Foto principal: cabe em ~95% da largura, máx ~68% da altura do canvas
+        max_photo_w = int(w * 0.95)
+        max_photo_h = int(h * 0.68)
+        scale_photo = min(max_photo_w / src_w, max_photo_h / src_h)
+        ph_w = int(src_w * scale_photo)
+        ph_h = int(src_h * scale_photo)
+        photo = img.resize((ph_w, ph_h), Image.LANCZOS)
+
+        # Aplica máscara de fade na borda inferior da foto para fundir com o fundo
+        photo_rgba = photo.convert("RGBA")
+        fade_zone = int(ph_h * 0.28)  # os últimos 28% da foto dissolvem
+        r_ch, g_ch, b_ch, a_ch = photo_rgba.split()
+        import PIL.Image as _PILImage
+        mask = _PILImage.new("L", (ph_w, ph_h), 255)
+        mask_draw = ImageDraw.Draw(mask)
+        for dy in range(fade_zone):
+            alpha_val = int(255 * (1 - dy / fade_zone))
+            mask_draw.line([(0, ph_h - fade_zone + dy), (ph_w, ph_h - fade_zone + dy)], fill=alpha_val)
+        a_ch = _PILImage.composite(a_ch, _PILImage.new("L", (ph_w, ph_h), 0), mask)
+        photo_rgba = _PILImage.merge("RGBA", (r_ch, g_ch, b_ch, a_ch))
+
+        # Posiciona centralizada horizontalmente, com margem superior pequena
+        canvas = bg.convert("RGBA")
+        px = (w - ph_w) // 2
+        py = int(h * 0.03)
+        canvas.paste(photo_rgba, (px, py), mask=photo_rgba)
+
+        # Gradiente começa a 45% da foto — reforça a fusão
+        gradient_start_y = py + int(ph_h * 0.45)
+
+        return canvas.convert("RGB"), gradient_start_y
 
 
-def _draw_gradient(img: Image.Image) -> Image.Image:
-    """Gradiente magenta→roxo escuro nos ~58% inferiores."""
+def _draw_gradient(img: Image.Image, start_y: int | None = None) -> Image.Image:
+    """Gradiente magenta→roxo escuro. start_y permite controle externo do ponto de início."""
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     w, h = img.size
-    start_y = int(h * GRADIENT_START_FRAC)
+    if start_y is None:
+        start_y = int(h * GRADIENT_START_FRAC)
     gradient_h = h - start_y
     r1, g1, b1 = GRADIENT_TOP_COLOR
     r2, g2, b2 = GRADIENT_BOTTOM_COLOR
@@ -296,13 +284,13 @@ def generate_ig_image(
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{slug}_ig.webp"
 
-    # 1. Carrega e faz smart crop
+    # 1. Carrega e constrói fundo fotográfico
     with Image.open(cover_path) as raw:
-        img = _smart_crop(raw.convert("RGB"), IG_W, IG_H)
+        img, gradient_start_y = _build_photo_background(raw.convert("RGB"), IG_W, IG_H)
 
     # 2. Escurece se foto muito clara, depois aplica gradiente
     img = _darken_if_bright(img)
-    img = _draw_gradient(img)
+    img = _draw_gradient(img, start_y=gradient_start_y)
 
     # 3. Logo flat centralizado na base
     img, logo_top_y = _paste_logo_centered(img)
