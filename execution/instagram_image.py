@@ -321,10 +321,13 @@ def main() -> None:
     parser.add_argument("--title", required=True)
     parser.add_argument("--category", default="Eventos")
     parser.add_argument("--output-dir", default=".tmp")
+    parser.add_argument("--art-title", default="", help="Título principal da arte (opcional, substitui --title)")
+    parser.add_argument("--art-subtitle", default="", help="Linha de apoio da arte (opcional)")
     parser.add_argument("--model", default="", help="(ignorado — mantido para compatibilidade)")
     args = parser.parse_args()
 
-    result = generate_ig_image(args.cover, args.category, args.title, args.slug, args.output_dir)
+    art_title = args.art_title if args.art_title else args.title
+    result = generate_ig_image(args.cover, args.category, art_title, args.slug, args.output_dir)
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     sys.stdout.buffer.write(b"\n")
 
