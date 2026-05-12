@@ -119,13 +119,49 @@ def _build_remaining_buttons(entry: dict) -> list[list[dict]]:
 
 def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
                      cover: str, sheets_row_id: str,
-                     ig_image_path: str = "", ig_caption: str = "") -> dict:
+                     ig_image_path: str = "", ig_caption: str = "",
+                     card_meta: dict | None = None) -> dict:
     """Envia card de aprovação com imagem, resumo e botões Site/Instagram/Descartar."""
-    caption = (
-        f"📰 *{_escape(title)}*\n\n"
-        f"{_escape(summary)}\n\n"
-        f"[Editar rascunho]({edit_url})"
-    )
+    if card_meta:
+        cidade = card_meta.get("cidade", "")
+        categoria = card_meta.get("categoria", "")
+        por_que = card_meta.get("por_que_importa", summary)
+        site_score = card_meta.get("potencial_site", "")
+        ig_score = card_meta.get("potencial_instagram", "")
+        urgencia = card_meta.get("urgencia", "")
+        acao = card_meta.get("acao_recomendada", "")
+        alertas = card_meta.get("alertas", [])
+
+        loc_cat = f"📍 {_escape(cidade)} · {_escape(categoria)}" if cidade or categoria else ""
+        scores = f"📊 Site {site_score}/10 · Instagram {ig_score}/10" if site_score or ig_score else ""
+        urg_line = f"⏰ Urgência: {urgencia}/10" if urgencia else ""
+        acao_line = f"💡 {_escape(acao)}" if acao else ""
+        alerta_line = (
+            f"⚠️ Revisar: {_escape('; '.join(str(a) for a in alertas[:2]))}"
+            if alertas else ""
+        )
+
+        partes = [
+            f"📰 *{_escape(title)}*",
+            loc_cat,
+            "",
+            _escape(por_que[:200]),
+            "",
+            scores,
+            urg_line,
+            acao_line,
+            alerta_line,
+            "",
+            f"[Editar rascunho]({edit_url})",
+        ]
+        import re as _re
+        caption = _re.sub(r"\n{3,}", "\n\n", "\n".join(p for p in partes if p is not None)).strip()
+    else:
+        caption = (
+            f"📰 *{_escape(title)}*\n\n"
+            f"{_escape(summary)}\n\n"
+            f"[Editar rascunho]({edit_url})"
+        )
 
     # Monta botões: Site sempre presente; IG só se tiver imagem
     row = [{"text": "✅ Site", "callback_data": f"publish:{post_id}:{sheets_row_id}"}]
@@ -489,6 +525,7 @@ def main() -> None:
     p_sr.add_argument("--sheets-row-id", required=True)
     p_sr.add_argument("--ig-image", default="", help="Caminho da imagem IG (opcional)")
     p_sr.add_argument("--ig-caption", default="", help="Legenda IG (opcional)")
+    p_sr.add_argument("--card-meta", default="", help="JSON string com campos de resumo_telegram")
     p_sr.add_argument("--listen", action="store_true",
                        help="Inicia listener imediatamente após enviar (recomendado)")
     p_sr.add_argument("--listen-timeout", type=int, default=1800,
@@ -510,11 +547,13 @@ def main() -> None:
     if args.command == "send-pauta-list":
         result = cmd_send_pauta_list(json.loads(args.data))
     elif args.command == "send-release":
+        card_meta_parsed = json.loads(args.card_meta) if args.card_meta else None
         result = cmd_send_release(
             args.post_id, args.title, args.summary,
             args.edit_url, args.cover, args.sheets_row_id,
             ig_image_path=args.ig_image,
             ig_caption=args.ig_caption,
+            card_meta=card_meta_parsed,
         )
         # Inicia listener imediatamente no mesmo processo se --listen passado
         if args.listen and result.get("ok"):
