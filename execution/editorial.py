@@ -270,14 +270,18 @@ Release original:
 
 def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) -> dict:
     """
-    Gera legenda para Instagram.
+    Gera legenda para Instagram com 4-6 blocos, narrativa editorial, sem hashtags.
     arte_instagram: dict com titulo_principal/linha_apoio/badge — evita repetir texto da arte.
     Sem créditos — créditos são exclusivos do HTML WordPress.
     """
     from llm_call import llm_call_json
 
     _FALLBACK = {
-        "legenda_curta": "Tem programação cultural chegando por aqui.\n\nA gente reuniu no +blog as informações confirmadas para você entender melhor o que vai rolar e se programar.\n\nVale salvar e mandar para quem curte esse tipo de rolê.",
+        "legenda_curta": (
+            "Tem programação cultural chegando por aqui.\n\n"
+            "A gente reuniu no +blog as informações confirmadas para você entender melhor o que vai rolar.\n\n"
+            "Vale salvar e mandar para quem curte esse tipo de programação na região."
+        ),
         "legenda_contexto": "",
         "cta_sugerido": "",
     }
@@ -285,74 +289,139 @@ def gerar_legenda(fatos: dict, resumo: str, arte_instagram: dict | None = None) 
     arte = arte_instagram or {}
     arte_str = ""
     if arte.get("titulo_principal"):
-        arte_str = f"badge: {arte.get('badge', '')}\ntitulo: {arte.get('titulo_principal', '')}\nlinha_apoio: {arte.get('linha_apoio', '')}"
+        arte_str = (
+            f"badge: {arte.get('badge', '')}\n"
+            f"titulo: {arte.get('titulo_principal', '')}\n"
+            f"linha_apoio: {arte.get('linha_apoio', '')}"
+        )
 
     fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
 
     system = f"""{_VOZ_EDITORIAL}
 
-Você é social media do +blog. Crie duas versões de legenda para Instagram.
+Você é social media e editor do +blog.
 
-A legenda precisa soar como Instagram de verdade — humana, leve, regional e natural.
-NÃO deve parecer release. NÃO deve parecer resumo frio. NÃO deve ser institucional.
-NÃO usar hashtags em hipótese alguma.
+Crie duas versões de legenda para Instagram com linguagem leve, humana, regional e natural.
 
-ESTRUTURA:
-1. Abertura informativa e natural (1-2 frases — dado concreto, não "Vem aí" nem "Confira")
-2. Desenvolvimento com o que vai acontecer (detalhes confirmados)
-3. Frase que convide a salvar, marcar alguém, viver ou acompanhar
-4. CTA final orgânico e variado conforme o conteúdo
+O +blog fala com pessoas de Americana, Santa Bárbara d'Oeste, Nova Odessa e Sumaré que querem descobrir eventos, cultura, lazer e boas experiências na região.
 
-ESCOLHA DE CTA conforme o conteúdo:
-- evento com data confirmada → sugerir salvar na agenda
-- evento cultural → sugerir chamar ou marcar alguém
-- programação com mais detalhes → sugerir acessar o +blog
-- conteúdo inspirador → sugerir mandar pra quem precisa ver
+A legenda precisa ter cara de Instagram de verdade.
+Ela não deve parecer release.
+Ela não deve parecer resumo frio de matéria.
+Ela não deve ser institucional.
+Ela não deve repetir mecanicamente o texto da arte.
+Ela NÃO deve ter hashtags — nenhuma sequer.
 
-USE COMO REFERÊNCIA DE ESTILO (não copie, inspire-se no tom e ritmo):
-"O 1º Sarau Ameriafro chega na Estação Cultura no dia 16 de maio, com programação gratuita das 14h às 21h
+ESTRUTURA OBRIGATÓRIA — 4 a 6 blocos curtos:
 
-Vai ter poesia, hip hop, capoeira, dança, grafite, maracatu, música, artes visuais, batalha de rima e gente da região ocupando a cidade com cultura afro-brasileira
+1. Abertura curta e natural — uma frase leve que puxe atenção sem "Vem aí" nem "Confira".
+2. Contexto do evento/projeto — o que é, onde acontece.
+3. Informações de serviço — data, horário, local, gratuidade e público quando confirmados.
+4. Camada editorial — por que isso importa para a cidade, a cultura, a região ou quem acompanha o portal.
+5. CTA social — salvar, mandar para alguém, marcar alguém ou comentar, conforme o conteúdo.
+6. CTA para o portal — convidar a acessar o +blog de forma natural (só se fizer sentido).
 
-É o tipo de evento pra salvar na agenda, chamar alguém e viver de perto
+TAMANHO:
+- legenda_curta: 3 a 4 blocos curtos
+- legenda_contexto: 5 a 6 blocos curtos — com mais narrativa e camada editorial
 
-Quem você levaria nesse rolê? Marca aqui
+REFERÊNCIA DE ESTILO (inspire-se no tom e ritmo, não copie):
+"Tem história chegando no CEU das Artes
 
-No +blog tem a programação completa com horários e atrações pra você se organizar antes de ir"
+Nos dias 12 e 13 de maio, o projeto Nas Asas da Leitura passa por Santa Bárbara com sessões gratuitas de contação de histórias para crianças e público em geral
+
+A programação acontece em dois horários, às 9h30 e às 13h30, com Valter Valverde, Renata de Paula e outros contadores conduzindo as atividades
+
+É aquele tipo de programação simples, bonita e necessária: aproxima as crianças da leitura, movimenta os espaços públicos e cria memória boa na cidade
+
+Se você conhece alguém que curte programação cultural para crianças, já manda esse post
+
+No +blog tem mais detalhes para você se organizar antes de ir"
 
 REGRAS ABSOLUTAS:
-- NUNCA usar hashtags (#) — nem uma sequer
-- não inventar data, horário, local, cidade, valor ou gratuidade
+- NUNCA usar hashtags (#) — nem uma sequer em nenhum campo
+- não inventar data, horário, local, cidade, valor, gratuidade, atrações ou participantes
 - não repetir mecanicamente o texto da arte
-- não usar "imperdível"
+- não usar "imperdível", "confira", "experiência mágica", "incrível" (elogio genérico)
 - não usar linguagem institucional
 - sem créditos de texto ou fotos
 - sem mencionar assessoria ou fonte
-- frases fluidas, com ritmo, tom próximo e regional
+- frases curtas e fluidas, com ritmo de Instagram
+- CTA variado — não usar sempre a mesma frase
 
 Retorne APENAS um objeto JSON válido:
 {{
-  "legenda_curta": "versão direta — gancho + desenvolvimento + convite + CTA. SEM hashtags.",
-  "legenda_contexto": "versão alternativa com mais contexto — para o editor escolher. SEM hashtags.",
-  "cta_sugerido": "o CTA escolhido"
+  "legenda_curta": "3 a 4 blocos curtos. SEM hashtags.",
+  "legenda_contexto": "5 a 6 blocos com mais narrativa e camada editorial. SEM hashtags.",
+  "cta_sugerido": "o CTA social escolhido"
 }}"""
 
-    user_parts = [f"Fatos confirmados:\n{fatos_str}", f"Resumo da matéria:\n{resumo[:500]}"]
+    user_parts = [f"Fatos confirmados:\n{fatos_str}", f"Resumo da matéria:\n{resumo[:600]}"]
     if arte_str:
         user_parts.append(f"Texto da arte (não repetir mecanicamente):\n{arte_str}")
     user = "\n\n".join(user_parts)
 
+    def _limpar_hashtags(texto: str) -> str:
+        """Remove linhas que são apenas hashtags e tokens # soltos."""
+        linhas = [l for l in texto.splitlines() if not l.strip().startswith("#")]
+        return "\n".join(linhas)
+
+    def _blocos(texto: str) -> int:
+        """Conta blocos/parágrafos separados por linha em branco."""
+        return len([b for b in texto.split("\n\n") if b.strip()])
+
+    def _valida_legenda(result: dict) -> list[str]:
+        erros = []
+        ctx = result.get("legenda_contexto", "")
+        if "#" in result.get("legenda_curta", "") or "#" in ctx:
+            erros.append("contém hashtag")
+        for proibida in ("imperdível", "confira", "experiência mágica"):
+            if proibida in ctx.lower() or proibida in result.get("legenda_curta", "").lower():
+                erros.append(f"contém '{proibida}'")
+        if _blocos(ctx) < 4:
+            erros.append(f"legenda_contexto tem apenas {_blocos(ctx)} bloco(s) — mínimo 4")
+        return erros
+
     try:
         result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
-        if isinstance(result, dict) and result.get("legenda_curta"):
-            # Remove hashtags residuais linha a linha
-            for campo in ("legenda_curta", "legenda_contexto"):
-                if campo in result:
-                    linhas = [l for l in result[campo].splitlines() if not l.strip().startswith("#")]
-                    result[campo] = "\n".join(linhas)
-            result.pop("hashtags", None)  # remove se LLM devolver mesmo proibido
-            return result
-        return _FALLBACK
+        if not (isinstance(result, dict) and result.get("legenda_curta")):
+            return _FALLBACK
+
+        # Limpeza defensiva de hashtags
+        for campo in ("legenda_curta", "legenda_contexto"):
+            if campo in result:
+                result[campo] = _limpar_hashtags(result[campo])
+        result.pop("hashtags", None)
+
+        # Validação — retentativa se legenda_contexto curta demais ou com erros
+        erros = _valida_legenda(result)
+        if erros:
+            print(f"[editorial] legenda com problema(s): {erros} — retentativa com feedback.", file=sys.stderr)
+            feedback = "; ".join(erros)
+            user_retry = (
+                f"{user}\n\n"
+                f"FEEDBACK DA VALIDAÇÃO: a legenda anterior foi rejeitada por: {feedback}.\n"
+                f"Reescreva com mais contexto, ritmo e camada editorial, mantendo apenas informações confirmadas.\n"
+                f"legenda_contexto deve ter pelo menos 5 blocos separados por linha em branco. Sem hashtags."
+            )
+            try:
+                result2 = llm_call_json(system=system, user=user_retry, model=EDITORIAL_MODEL)
+                if isinstance(result2, dict) and result2.get("legenda_curta"):
+                    for campo in ("legenda_curta", "legenda_contexto"):
+                        if campo in result2:
+                            result2[campo] = _limpar_hashtags(result2[campo])
+                    result2.pop("hashtags", None)
+                    erros2 = _valida_legenda(result2)
+                    if not erros2:
+                        print(f"[editorial] legenda corrigida na retentativa.", file=sys.stderr)
+                        return result2
+                    else:
+                        print(f"[editorial] retentativa ainda com erros: {erros2} — usando resultado original.", file=sys.stderr)
+            except Exception as e2:
+                print(f"[editorial] retentativa de legenda falhou ({e2}).", file=sys.stderr)
+
+        return result
+
     except Exception as e:
         print(f"[editorial] gerar_legenda falhou: {e}", file=sys.stderr)
         return _FALLBACK
