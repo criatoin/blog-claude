@@ -96,6 +96,25 @@ credentials.json        ← OAuth credentials (no .gitignore)
 
 ---
 
+## ⚠️ RESTRIÇÕES CRÍTICAS — NUNCA VIOLAR
+
+### Servidor e infraestrutura
+- NUNCA alterar variáveis de ambiente no Coolify ou no servidor
+- NUNCA fazer redeploy, restart ou stop de qualquer serviço no Coolify
+- NUNCA modificar arquivos docker-compose.yml de serviços fora do projeto atual
+- NUNCA executar comandos docker que afetem containers de outros serviços
+- NUNCA modificar arquivos de configuração do servidor (nginx, traefik, etc.)
+
+### Serviços protegidos (intocáveis)
+- n8n (integradorn8n.criatoin.com.br)
+- PostgreSQL do n8n
+- Qualquer outro serviço rodando no Coolify que não seja o projeto atual
+
+### Regra geral
+Se uma ação puder afetar serviços fora do escopo do projeto atual,
+PARE e pergunte antes de executar.
+
+
 ## Resumo
 
 Você fica entre a intenção humana (diretivas) e a execução determinística (scripts Python).
