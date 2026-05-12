@@ -390,7 +390,7 @@ def resumo_telegram(post: dict, validacao: dict, avaliacao: dict) -> dict:
     risco = validacao.get("risco_alucinacao", "baixo")
     alertas = []
     if risco in ("medio", "alto"):
-        for p in validacao.get("problemas", []):
+        for p in (validacao.get("problemas") or []):
             if p.get("trecho"):
                 alertas.append(f"{p['trecho'][:60]}: {p.get('problema', '')[:80]}")
 
@@ -414,7 +414,9 @@ def query_from_fatos(fatos: dict, titulo: str) -> str:
     """
     partes = []
     if fatos.get("atracoes"):
-        partes.append(fatos["atracoes"][0])
+        primeiro = fatos["atracoes"][0]
+        if isinstance(primeiro, str):
+            partes.append(primeiro)
     if fatos.get("categoria_editorial"):
         partes.append(fatos["categoria_editorial"])
     return " ".join(partes) or titulo[:60]
