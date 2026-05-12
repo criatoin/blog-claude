@@ -403,7 +403,7 @@ REGRAS PARA texto_arte
 - titulo_principal: máx 6 palavras, SEM ponto final, SEM hashtags (#)
 - titulo_principal NÃO pode ser igual ao titulo_site
 - titulo_principal NÃO pode conter: "imperdível", "confira", "não perca", "vem aí", "promete", "programação especial", "acontece em"
-- linha_apoio: máx 12 palavras, sem ponto final, sem hashtag, não repetir o título
+- linha_apoio: máx 35 caracteres no total — frase curta que cabe em uma linha, sem ponto final, sem hashtag, não repetir o título
 - NUNCA usar hashtags (#) em nenhum campo de texto_arte
 - só usar "gratuito" ou "grátis" se gratuito=true nos fatos extraídos
 - só mencionar cidade, data ou local se estiverem nos fatos extraídos
@@ -589,10 +589,17 @@ REGRAS ABSOLUTAS:
 - frases curtas e fluidas, com ritmo de Instagram
 - CTA variado — não repetir sempre a mesma frase
 
+FORMATO OBRIGATÓRIO DO JSON:
+Os campos legenda_curta e legenda_contexto devem ter os blocos separados por \\n\\n (dois \\n).
+Cada bloco é um parágrafo curto. Nunca coloque tudo em um único parágrafo.
+
+Exemplo de formato correto para legenda_contexto:
+"Bloco 1 — abertura.\\n\\nBloco 2 — contexto.\\n\\nBloco 3 — serviço.\\n\\nBloco 4 — camada editorial.\\n\\nBloco 5 — CTA social.\\n\\nBloco 6 — CTA portal."
+
 Retorne APENAS um objeto JSON válido:
 {{
-  "legenda_curta": "3 a 4 blocos. SEM hashtags.",
-  "legenda_contexto": "5 a 6 blocos com camada editorial e CTA. SEM hashtags.",
+  "legenda_curta": "bloco1.\\n\\nbloco2.\\n\\nbloco3.\\n\\nbloco4.",
+  "legenda_contexto": "bloco1.\\n\\nbloco2.\\n\\nbloco3.\\n\\nbloco4.\\n\\nbloco5.\\n\\nbloco6.",
   "cta_sugerido": "o CTA social escolhido"
 }}"""
 
@@ -662,11 +669,15 @@ Retorne APENAS um objeto JSON válido:
             feedback = "; ".join(erros)
             user_retry = (
                 f"{user}\n\n"
-                f"FEEDBACK DA VALIDAÇÃO: a legenda anterior foi rejeitada por: {feedback}.\n"
-                f"Reescreva com abertura simples e natural (sem poesia artificial), "
-                f"pelo menos 5 blocos em legenda_contexto, camada editorial clara explicando "
-                f"por que o conteúdo importa para a cidade, CTA social e CTA para o +blog. "
-                f"Use somente fatos confirmados. Sem hashtags."
+                f"FEEDBACK DA VALIDAÇÃO: a legenda anterior foi rejeitada por: {feedback}.\n\n"
+                f"OBRIGATÓRIO na retentativa:\n"
+                f"- legenda_contexto DEVE ter 5 ou 6 blocos separados por \\n\\n\n"
+                f"- bloco 4 deve ser camada editorial: por que isso importa para a cidade\n"
+                f"- bloco 5 deve ser CTA social natural\n"
+                f"- bloco 6 deve ser CTA para o +blog\n"
+                f"- abertura simples e direta, sem frases poéticas\n"
+                f"- use somente fatos confirmados, sem hashtags\n\n"
+                f"Formato dos campos: blocos separados por \\n\\n (dois backslash-n)."
             )
             try:
                 result2 = llm_call_json(system=system, user=user_retry, model=EDITORIAL_MODEL)
@@ -874,10 +885,19 @@ def validar_arte(arte: dict, fatos: dict, release_titulo: str = "") -> tuple[dic
         alertas.append("titulo_principal igual ao release — fallback")
         titulo = _fallback_titulo_arte(fatos)
 
-    # 7. Linha de apoio: máx 12 palavras
-    if linha and len(linha.split()) > 12:
-        alertas.append(f"linha_apoio longa ({len(linha.split())} palavras), truncada")
-        linha = " ".join(linha.split()[:12])
+    # 7. Linha de apoio: máx 35 caracteres (deve caber em uma linha sem quebra)
+    if linha and len(linha) > 35:
+        alertas.append(f"linha_apoio longa ({len(linha)} chars), truncada")
+        # Trunca na última palavra que ainda cabe em 35 chars
+        palavras_linha = linha.split()
+        acum = ""
+        for p in palavras_linha:
+            candidato = (acum + " " + p).strip()
+            if len(candidato) <= 35:
+                acum = candidato
+            else:
+                break
+        linha = acum if acum else linha[:35]
 
     # 8. Badge: máx 2 palavras
     if badge and len(badge.split()) > 2:
@@ -989,7 +1009,7 @@ Regras do texto_arte:
 - badge: 1 ou 2 palavras em maiúsculas, sem hashtag
 - titulo_principal: máx 6 palavras, sem ponto final, sem hashtag, sem palavras proibidas
 - titulo_principal deve refletir o foco principal — não use atividades passadas nem itens proibidos
-- linha_apoio: máx 12 palavras, sem hashtag
+- linha_apoio: máx 35 caracteres no total — deve caber em uma linha, sem hashtag
 - NUNCA usar hashtags em nenhum campo
 - só mencionar gratuidade se gratuito=true nos fatos
 
