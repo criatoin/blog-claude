@@ -197,10 +197,10 @@ def generate_ig_image(
     # ── Logo no rodapé ─────────────────────────────────────────────────────────
     try:
         logo = Image.open(LOGO_PATH).convert("RGBA")
-        data = logo.getdata()
+        pixels = list(logo.getdata())
         logo.putdata([
             (r, g, b, 0) if r > 230 and g > 230 and b > 230 else (r, g, b, a)
-            for r, g, b, a in data
+            for r, g, b, a in pixels
         ])
         bbox = logo.getbbox()
         if bbox:
@@ -211,8 +211,8 @@ def generate_ig_image(
         LX   = (W - LW) // 2
         LY   = H - LH - 58
         canvas.alpha_composite(logo, (LX, LY))
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[instagram_image] aviso: logo não colado — {e}", file=__import__("sys").stderr)
 
     # ── Salva WebP dentro do limite de 1MB ────────────────────────────────────
     img = canvas.convert("RGB")
