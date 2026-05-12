@@ -130,24 +130,18 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         img_bytes = buf.getvalue()
 
         prompt = (
-            f"This image came attached to a press release from a Brazilian city hall. "
-            f"Analyze it in two strict sequential steps. Answer ONLY 'yes' or 'no'.\n\n"
-            f"STEP 1 — IMAGE TYPE:\n"
-            f"Is this image PRIMARILY a graphic design piece (logo, flyer, poster, infographic, "
-            f"corporate seal, illustration) where TEXT or BRAND ELEMENTS dominate the visual?\n"
-            f"→ If the image is a REAL PHOTOGRAPH of people, places, or events — even if it has "
-            f"incidental text on signs or banners — answer 'yes' and continue.\n"
-            f"→ Only answer 'no' (reject) if the image is clearly a graphic design, not a photo.\n\n"
-            f"STEP 2 — CULTURAL CONTEXT (only if Step 1 passed):\n"
-            f"This image will appear on a Brazilian news blog. "
-            f"Does the image show people in cultural dress CLEARLY incompatible with Brazil "
-            f"(hijab, sari, East Asian traditional costume)? "
-            f"Casual clothing, school uniforms, stage costumes, and local event attire are all fine.\n"
-            f"→ Only answer 'no' (reject) if incompatible cultural markers are UNMISTAKABLY visible.\n"
-            f"→ Otherwise answer 'yes'.\n\n"
-            f"Post title for context (do NOT use this to reject the image — it's just context): '{titulo}'\n\n"
-            f"IMPORTANT: This is a real press release photo. Err on the side of accepting. "
-            f"Only reject if the image is clearly a graphic/logo (Step 1) or clearly foreign cultural dress (Step 2)."
+            f"This image came attached to a press release from a Brazilian cultural event. "
+            f"Answer ONLY 'yes' (accept) or 'no' (reject).\n\n"
+            f"ACCEPT the image if ANY of these are true:\n"
+            f"- It contains real people (even if standing in front of a banner, sign, or poster)\n"
+            f"- It shows a real place or venue relevant to the event\n"
+            f"- It is a real photograph, even if it has text overlays, logos, or event banners in the background\n\n"
+            f"REJECT the image ONLY if ALL of these are true:\n"
+            f"- There are NO real people visible in the photo\n"
+            f"- The image is purely a graphic: flyer, poster, digital art, logo, or infographic with no photographic content\n\n"
+            f"Post title for context: '{titulo}'\n\n"
+            f"IMPORTANT: A photo of people standing in front of an event banner is a REAL PHOTO — accept it. "
+            f"Only reject pure graphic design with zero photographic content."
         )
 
         response = client.models.generate_content(

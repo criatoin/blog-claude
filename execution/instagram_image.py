@@ -48,6 +48,7 @@ TITLE_COLOR = "white"
 BADGE_FONT_SIZE = 30
 TITLE_FONT_SIZE_MAX = 52
 TITLE_FONT_SIZE_MIN = 28
+SUBTITLE_FONT_SIZE = 28
 MARGIN = 44
 
 # Espaçamentos verticais (de baixo para cima)
@@ -272,6 +273,7 @@ def generate_ig_image(
     title: str,
     slug: str,
     output_dir: str = ".tmp",
+    subtitle: str = "",
 ) -> dict:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -287,15 +289,23 @@ def generate_ig_image(
     # 3. Logo flat centralizado na base
     img, logo_top_y = _paste_logo_centered(img)
 
-    # 4. Badge + título ancorados acima do logo
+    # 4. Badge + título + linha de apoio ancorados acima do logo
     badge_font = _load_font(BADGE_FONT_SIZE)
+    subtitle_font = _load_font(SUBTITLE_FONT_SIZE)
     title_font, wrapped_lines = _fit_title_font(title, IG_W - MARGIN * 2)
     line_height = title_font.size + 10
     title_block_h = len(wrapped_lines) * line_height
+
+    # Linha de apoio (subtitle): quebra em até 2 linhas
+    subtitle_lines = _wrap_text(subtitle, subtitle_font, IG_W - MARGIN * 2)[:2] if subtitle else []
+    subtitle_line_h = SUBTITLE_FONT_SIZE + 8
+    subtitle_block_h = len(subtitle_lines) * subtitle_line_h + (10 if subtitle_lines else 0)
+
     badge_sample = badge_font.getbbox("A")
     badge_h = (badge_sample[3] - badge_sample[1]) + 14 * 2
 
-    title_y = logo_top_y - LOGO_GAP - title_block_h
+    # Ancora de baixo para cima: logo → título → subtitle → badge
+    title_y = logo_top_y - LOGO_GAP - subtitle_block_h - title_block_h
     badge_y = title_y - BADGE_TITLE_GAP - badge_h
 
     draw = ImageDraw.Draw(img)
@@ -304,6 +314,12 @@ def generate_ig_image(
     for line in wrapped_lines:
         draw.text((MARGIN, y), line, fill=TITLE_COLOR, font=title_font)
         y += line_height
+
+    if subtitle_lines:
+        y += 10  # pequeno gap entre título e subtitle
+        for line in subtitle_lines:
+            draw.text((MARGIN, y), line, fill="white", font=subtitle_font)
+            y += subtitle_line_h
 
     # 5. Salva como WebP
     _compress_webp(img, dest)
@@ -327,7 +343,7 @@ def main() -> None:
     args = parser.parse_args()
 
     art_title = args.art_title if args.art_title else args.title
-    result = generate_ig_image(args.cover, args.category, art_title, args.slug, args.output_dir)
+    result = generate_ig_image(args.cover, args.category, art_title, args.slug, args.output_dir, subtitle=args.art_subtitle)
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))
     sys.stdout.buffer.write(b"\n")
 
