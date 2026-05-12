@@ -104,18 +104,24 @@ def _build_photo_background(img: Image.Image, w: int, h: int) -> tuple[Image.Ima
         bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
         bg = ImageEnhance.Brightness(bg).enhance(0.40)
 
-        # Foto principal: preenche 100% da altura do canvas (foto horizontal estica até o rodapé)
-        # O fade na borda inferior dissolve a foto no fundo borrado, dando espaço visual para o texto
-        max_photo_w = w
-        max_photo_h = h  # altura total — sem gap roxo vazio abaixo da foto
-        scale_photo = min(max_photo_w / src_w, max_photo_h / src_h)
+        # Foto principal: escala pela altura do canvas para eliminar qualquer gap roxo abaixo.
+        # Fotos mais largas que o canvas são centralizadas e cortadas lateralmente (crop).
+        scale_photo = h / src_h  # escala pela altura — garante ph_h == h
         ph_w = int(src_w * scale_photo)
-        ph_h = int(src_h * scale_photo)
-        photo = img.resize((ph_w, ph_h), Image.LANCZOS)
+        ph_h = h
+        photo_full = img.resize((ph_w, ph_h), Image.LANCZOS)
+
+        # Crop central se mais larga que o canvas
+        if ph_w > w:
+            crop_x = (ph_w - w) // 2
+            photo_full = photo_full.crop((crop_x, 0, crop_x + w, ph_h))
+            ph_w = w
+
+        photo = photo_full
 
         # Aplica máscara de fade na borda inferior da foto para fundir com o fundo borrado
         photo_rgba = photo.convert("RGBA")
-        fade_zone = int(ph_h * 0.45)  # os últimos 45% da foto dissolvem gradualmente
+        fade_zone = int(ph_h * 0.40)  # os últimos 40% da foto dissolvem gradualmente
         r_ch, g_ch, b_ch, a_ch = photo_rgba.split()
         import PIL.Image as _PILImage
         mask = _PILImage.new("L", (ph_w, ph_h), 255)
@@ -126,14 +132,14 @@ def _build_photo_background(img: Image.Image, w: int, h: int) -> tuple[Image.Ima
         a_ch = _PILImage.composite(a_ch, _PILImage.new("L", (ph_w, ph_h), 0), mask)
         photo_rgba = _PILImage.merge("RGBA", (r_ch, g_ch, b_ch, a_ch))
 
-        # Posiciona centralizada horizontalmente, alinhada ao topo
+        # Cola cobrindo o canvas inteiro (py=0)
         canvas = bg.convert("RGBA")
         px = (w - ph_w) // 2
         py = 0
         canvas.paste(photo_rgba, (px, py), mask=photo_rgba)
 
-        # Gradiente começa a 55% da altura — foto já está esmaecida nessa região
-        gradient_start_y = int(h * 0.55)
+        # Gradiente começa onde o fade começa — sem gap entre foto e texto
+        gradient_start_y = ph_h - fade_zone
 
         return canvas.convert("RGB"), gradient_start_y
 
