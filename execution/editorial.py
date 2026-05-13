@@ -400,7 +400,8 @@ REGRAS PARA texto_arte
 - Não use contexto secundário como chamada principal.
 - Não use nenhum termo listado em "NÃO USAR COMO FOCO".
 - badge: 1 ou 2 palavras em maiúsculas (ex: "LITERATURA", "MÚSICA", "CULTURA")
-- titulo_principal: máx 6 palavras, SEM ponto final, SEM hashtags (#)
+- titulo_principal: EXATAMENTE 4, 5 ou 6 palavras — NUNCA mais que 6. Conte as palavras antes de responder.
+- titulo_principal SEM ponto final, SEM hashtags (#)
 - titulo_principal NÃO pode ser igual ao titulo_site
 - titulo_principal NÃO pode conter: "imperdível", "confira", "não perca", "vem aí", "promete", "programação especial", "acontece em"
 - linha_apoio: máx 60 caracteres no total — frase curta que cabe em uma linha, sem ponto final, sem hashtag, não repetir o título
@@ -408,8 +409,9 @@ REGRAS PARA texto_arte
 - só usar "gratuito" ou "grátis" se gratuito=true nos fatos extraídos
 - só mencionar cidade, data ou local se estiverem nos fatos extraídos
 - titulo_principal deve parecer manchete de post social, não frase de release:
-    CERTO: "Histórias no CEU", "Leitura ganha asas", "Cultura preta na Estação"
-    ERRADO: "Projeto leva magia da leitura para crianças", "Cantigas que unem gerações"
+    CERTO (4-6 palavras): "Palhaços na praça hoje", "Cassiane e Morada em Americana", "Artesanato em Americana neste domingo"
+    ERRADO (7+ palavras — PROIBIDO): "Espetáculo de palhaços gratuito hoje na praça", "Festival traz Cassiane e Morada em maio"
+    ERRADO (estilo release): "Projeto leva magia da leitura para crianças", "Cantigas que unem gerações"
 
 ════════════════════════════════
 REGRAS DE CRÉDITO (campo creditos_wordpress)
@@ -848,11 +850,11 @@ def validar_arte(arte: dict, fatos: dict, release_titulo: str = "") -> tuple[dic
         alertas.append("titulo_principal vazio — aplicando fallback")
         titulo = _fallback_titulo_arte(fatos)
 
-    # 2. Máx 6 palavras
+    # 2. Máx 6 palavras — fallback em vez de corte cego
     palavras = titulo.split()
     if len(palavras) > 6:
-        alertas.append(f"titulo_principal longo ({len(palavras)} palavras), truncado")
-        titulo = " ".join(palavras[:6])
+        alertas.append(f"titulo_principal longo ({len(palavras)} palavras) — aplicando fallback")
+        titulo = _fallback_titulo_arte(fatos)
 
     # 3. Ponto final
     if titulo.endswith("."):
