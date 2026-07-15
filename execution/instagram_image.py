@@ -25,6 +25,7 @@ import argparse
 import json
 import os
 import sys
+from itertools import combinations
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -79,6 +80,69 @@ def _quebrar_linhas(texto: str, font: ImageFont.FreeTypeFont, max_w: int, draw: 
     return lines
 
 
+TITLE_MAX_W  = 944
+TITLE_SIZE_MAX = 92
+TITLE_SIZE_MIN = 60
+TITLE_MAX_LINES = 3
+
+
+def _particao_equilibrada(words: list[str], n: int, font, max_w: int, draw) -> list[str] | None:
+    """Divide words em n linhas contíguas minimizando a linha mais larga."""
+    if n == 1:
+        linha = " ".join(words)
+        return [linha] if draw.textlength(linha, font=font) <= max_w else None
+    if len(words) < n:
+        return None
+    melhor, melhor_max = None, None
+    for cortes in combinations(range(1, len(words)), n - 1):
+        partes, inicio = [], 0
+        for c in list(cortes) + [len(words)]:
+            partes.append(" ".join(words[inicio:c]))
+            inicio = c
+        larguras = [draw.textlength(p, font=font) for p in partes]
+        if max(larguras) > max_w:
+            continue
+        if melhor_max is None or max(larguras) < melhor_max:
+            melhor, melhor_max = partes, max(larguras)
+    return melhor
+
+
+def _balanced_wrap(texto: str, font, max_w: int, draw, max_lines: int = TITLE_MAX_LINES) -> list[str] | None:
+    """Menor nº de linhas em que o texto cabe, com larguras equilibradas. None se não couber."""
+    words = texto.split()
+    if not words:
+        return None
+    for n in range(1, max_lines + 1):
+        linhas = _particao_equilibrada(words, n, font, max_w, draw)
+        if linhas is not None:
+            return linhas
+    return None
+
+
+def compor_titulo(title: str, draw, max_w: int = TITLE_MAX_W,
+                  size_max: int = TITLE_SIZE_MAX, size_min: int = TITLE_SIZE_MIN):
+    """Retorna (linhas, fonte) na maior fonte que caiba, ou (None, None)."""
+    for size in range(size_max, size_min - 1, -2):
+        font = _load_font(size, "black")
+        linhas = _balanced_wrap(title, font, max_w, draw)
+        if linhas is not None:
+            return linhas, font
+    return None, None
+
+
+def title_fits(title: str) -> tuple[bool, str]:
+    """Preflight: o título renderiza em <=3 linhas com fonte >=60pt?"""
+    img = Image.new("RGBA", (IG_W, IG_H))
+    d = ImageDraw.Draw(img)
+    linhas, _ = compor_titulo(title, d)
+    if linhas is None:
+        return False, (
+            f"título não cabe em {TITLE_MAX_LINES} linhas com fonte mínima "
+            f"{TITLE_SIZE_MIN}pt — encurte para até ~70 caracteres"
+        )
+    return True, ""
+
+
 def generate_ig_image(
     cover_path: str,
     category: str,
@@ -87,12 +151,6 @@ def generate_ig_image(
     output_dir: str = ".tmp",
     subtitle: str = "",
 ) -> dict:
-    if len(title.split()) < 4:
-        raise ValueError(
-            f"Título muito curto: '{title}'. "
-            f"Use entre 4 e 6 palavras para o template funcionar corretamente."
-        )
-
     W, H = IG_W, IG_H
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -156,64 +214,9 @@ def generate_ig_image(
     # ── CAMADA 4: Textos ───────────────────────────────────────────────────────
     d = ImageDraw.Draw(canvas)
 
-    # Tag de categoria
-    ft     = _load_font(28, "bold")
-    cat_up = category.upper()
-    bb     = d.textbbox((0, 0), cat_up, font=ft)
-    tw     = bb[2] - bb[0]
-    th     = bb[3] - bb[1]
-    TX, TY, PW, PH = 68, 720, 32, 14  # TAG_Y=720 (mais baixo que 660)
-    rect = [TX, TY, TX + tw + PW * 2, TY + th + PH * 2]
-    d.rounded_rectangle(rect, radius=8, fill=(221, 230, 0))
-    d.text((TX + PW, TY + PH), cat_up, font=ft, fill=(0, 0, 0))
-    tag_bottom = rect[3]
-
-    # Título — quebra semântica por contagem de palavras + tamanho adaptativo
-    words = title.split()[:6]  # máximo 6 palavras — regra do template
-    n = len(words)
-
-    if n <= 2:
-        linhas = [title]
-        tamanho_inicial = 72
-    elif n == 3:
-        linhas = [" ".join(words[:2]), words[2]]
-        tamanho_inicial = 82
-    elif n == 4:
-        linhas = [" ".join(words[:2]), " ".join(words[2:])]
-        tamanho_inicial = 82
-    elif n == 5:
-        linhas = [" ".join(words[:3]), " ".join(words[3:])]
-        tamanho_inicial = 88
-    else:
-        linhas = [" ".join(words[:2]), " ".join(words[2:4]), " ".join(words[4:])]
-        tamanho_inicial = 92
-
-    tamanho = tamanho_inicial
-    fonte_ok = None
-    while tamanho >= 56:
-        fti = _load_font(tamanho, "black")
-        if max(d.textlength(l, font=fti) for l in linhas) <= 944:
-            fonte_ok = fti
-            break
-        tamanho -= 2
-
-    if fonte_ok is None:
-        fonte_ok = _load_font(56, "black")
-
-    ty = tag_bottom + 22
-    for linha in linhas:
-        d.text((68, ty), linha, font=fonte_ok, fill=(255, 255, 255))
-        ty += int(fonte_ok.size * 1.08)
-
-    # Linha de apoio — sem truncagem, quebra automática em 940px
-    if subtitle:
-        fa = _load_font(38, "regular")
-        ay = ty + 32
-        for linha in _quebrar_linhas(subtitle, fa, 940, d):
-            d.text((68, ay), linha, font=fa, fill=(255, 255, 255))
-            ay += int(fa.size * 1.35)
-
-    # ── Logo no rodapé ─────────────────────────────────────────────────────────
+    # ── Logo (calculado ANTES dos textos — âncora do layout) ─────────────────
+    logo_img, logo_pos = None, None
+    logo_top = H - 58 - 90  # fallback se logo falhar: reserva ~90px
     try:
         logo = Image.open(LOGO_PATH).convert("RGBA")
         pixels = list(logo.getdata())
@@ -224,14 +227,65 @@ def generate_ig_image(
         bbox = logo.getbbox()
         if bbox:
             logo = logo.crop(bbox)
-        LW   = 240
-        LH   = int(logo.height * LW / logo.width)
-        logo = logo.resize((LW, LH), Image.LANCZOS)
-        LX   = (W - LW) // 2
-        LY   = H - LH - 58
-        canvas.alpha_composite(logo, (LX, LY))
+        LW = 240
+        LH = int(logo.height * LW / logo.width)
+        logo_img = logo.resize((LW, LH), Image.LANCZOS)
+        logo_pos = ((W - LW) // 2, H - LH - 58)
+        logo_top = logo_pos[1]
     except Exception as e:
-        print(f"[instagram_image] aviso: logo não colado — {e}", file=__import__("sys").stderr)
+        print(f"[instagram_image] aviso: logo não colado — {e}", file=sys.stderr)
+
+    # ── Título: balanced wrap com autosize; fallback duro se não couber ──────
+    linhas, fonte_ok = compor_titulo(title, d)
+    if linhas is None:
+        # Último recurso determinístico: fonte mínima, quebra gulosa, 3 linhas + "…"
+        fonte_ok = _load_font(TITLE_SIZE_MIN, "black")
+        linhas = _quebrar_linhas(title, fonte_ok, TITLE_MAX_W, d)[:TITLE_MAX_LINES]
+        if linhas:
+            linhas[-1] = linhas[-1].rstrip() + "…"
+        print(f"[instagram_image] aviso: título não coube — truncado com reticências.",
+              file=sys.stderr)
+
+    # ── Linha de apoio (medida antes de posicionar o bloco) ──────────────────
+    fa = _load_font(38, "regular")
+    sub_linhas = _quebrar_linhas(subtitle, fa, 940, d) if subtitle else []
+
+    # ── Alturas do bloco de texto (badge + título + apoio) ───────────────────
+    ft = _load_font(28, "bold")
+    cat_up = category.upper()
+    bb = d.textbbox((0, 0), cat_up, font=ft)
+    tw, th = bb[2] - bb[0], bb[3] - bb[1]
+    PW, PH = 32, 14  # padding interno do badge
+    badge_h = th + PH * 2
+    titulo_h = int(fonte_ok.size * 1.08) * len(linhas)
+    apoio_h = (32 + int(fa.size * 1.35) * len(sub_linhas)) if sub_linhas else 0
+    bloco_h = badge_h + 22 + titulo_h + apoio_h
+
+    # ── Posiciona o bloco ancorado acima do logo, com respiro de 40px ────────
+    y0 = logo_top - 40 - bloco_h
+
+    # Badge
+    TX = 68
+    rect = [TX, y0, TX + tw + PW * 2, y0 + badge_h]
+    d.rounded_rectangle(rect, radius=8, fill=(221, 230, 0))
+    d.text((TX + PW, y0 + PH), cat_up, font=ft, fill=(0, 0, 0))
+
+    # Título
+    ty = rect[3] + 22
+    for linha in linhas:
+        d.text((68, ty), linha, font=fonte_ok, fill=(255, 255, 255))
+        ty += int(fonte_ok.size * 1.08)
+
+    # Linha de apoio
+    if sub_linhas:
+        ay = ty + 32
+        for linha in sub_linhas:
+            d.text((68, ay), linha, font=fa, fill=(255, 255, 255))
+            ay += int(fa.size * 1.35)
+
+    # Logo por último (por cima do degradê)
+    if logo_img is not None:
+        canvas.alpha_composite(logo_img, logo_pos)
 
     # ── Salva WebP dentro do limite de 1MB ────────────────────────────────────
     img = canvas.convert("RGB")
