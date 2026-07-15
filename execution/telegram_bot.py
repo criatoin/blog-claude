@@ -211,6 +211,151 @@ def _handle_approval(action: str, post_id: int, sheets_row_id: str,
             _save_json(PENDING_FILE, pending)
 
 
+def _completar_com_imagem(entry: dict, raw_image_path: str) -> None:
+    """
+    Fecha uma pendência de imagem: processa a foto, define destacada no WP,
+    gera arte IG e envia o card de aprovação completo.
+    """
+    sys.path.insert(0, str(SCRIPT_DIR))
+    slug = entry["slug"]
+    post_id = entry["post_id"]
+    output_dir = str(PROJECT_DIR / ".tmp")
+
+    def _run_json_local(args: list[str]) -> dict | None:
+        result = subprocess.run(["python3"] + args, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", cwd=str(PROJECT_DIR))
+        if result.returncode != 0:
+            print(f"[bot] Erro em {Path(args[0]).name}: {result.stderr[:300]}", file=sys.stderr)
+            return None
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+
+    # 1. Processa para capa 1920x1080 WebP
+    proc = _run_json_local([str(SCRIPT_DIR / "image_process.py"),
+                            "--input", raw_image_path, "--slug", slug,
+                            "--output-dir", output_dir])
+    if not proc or not proc.get("path"):
+        _send_text(f"❌ Falha ao processar a imagem do post #{post_id}. Tente outra foto.")
+        return
+    cover_path = proc["path"]
+
+    # 2. Define imagem destacada no WP
+    _run_json_local([str(SCRIPT_DIR / "wp_publish.py"), "set-featured",
+                     "--post-id", str(post_id), "--image-path", cover_path])
+
+    # 3. Gera arte IG e sobe para o WP Media
+    ig_path = ""
+    ig_result = _run_json_local([
+        str(SCRIPT_DIR / "instagram_image.py"),
+        "--cover", cover_path, "--slug", slug,
+        "--title", entry.get("titulo", ""),
+        "--category", entry.get("category_name", "Eventos"),
+        "--art-title", entry.get("art_title", ""),
+        "--art-subtitle", entry.get("art_subtitle", ""),
+        "--output-dir", output_dir,
+    ])
+    if ig_result:
+        ig_path = ig_result.get("path", "")
+        if ig_path:
+            _run_json_local([str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
+                             "--image-path", ig_path,
+                             "--title", f"{entry.get('titulo', '')} — Instagram"])
+
+    # 4. Envia o card de aprovação completo
+    notify_args = [str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
+                   "--post-id", str(post_id),
+                   "--title", entry.get("titulo", ""),
+                   "--summary", entry.get("summary", ""),
+                   "--edit-url", entry.get("edit_url", ""),
+                   "--cover", cover_path,
+                   "--sheets-row-id", "0"]
+    if entry.get("card_meta"):
+        notify_args += ["--card-meta", json.dumps(entry["card_meta"], ensure_ascii=False)]
+    if ig_path:
+        notify_args += ["--ig-image", ig_path, "--ig-caption", entry.get("legenda_curta", "")]
+    subprocess.run(["python3"] + notify_args, cwd=str(PROJECT_DIR))
+    print(f"[bot] Pendência de imagem do post #{post_id} resolvida.", file=sys.stderr)
+
+
+def _handle_image_callback(action: str, post_id_str: str, cb_id: str, msg_id: str) -> None:
+    """Callbacks usethis:<post_id> e sendphoto:<post_id>."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from telegram_notify import _load_pending_images, _save_pending_images
+
+    state = _load_pending_images()
+    entry = state["cards"].get(msg_id)
+    if not entry or str(entry.get("post_id")) != post_id_str:
+        _api("answerCallbackQuery", json={"callback_query_id": cb_id,
+                                          "text": "Este card já foi processado."})
+        return
+
+    if action == "usethis":
+        _api("answerCallbackQuery", json={"callback_query_id": cb_id,
+                                          "text": "✔️ Usando a sugestão..."})
+        _api("editMessageReplyMarkup", json={
+            "chat_id": _chat_id(), "message_id": int(msg_id),
+            "reply_markup": json.dumps({"inline_keyboard": []})})
+        state["cards"].pop(msg_id, None)
+        _save_pending_images(state)
+        _completar_com_imagem(entry, entry.get("suggestion_path", ""))
+
+    elif action == "sendphoto":
+        _api("answerCallbackQuery", json={"callback_query_id": cb_id,
+                                          "text": "📷 Manda a foto aqui no chat."})
+        state["awaiting"] = {"post_id": entry["post_id"], "msg_id": msg_id}
+        _save_pending_images(state)
+        _send_text(f"📷 Aguardando foto para o post #{entry['post_id']} — envie como imagem aqui no chat.")
+
+
+def _handle_photo_message(message: dict) -> None:
+    """Foto recebida no chat: se há pendência aguardando, resolve com ela."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from telegram_notify import _load_pending_images, _save_pending_images
+
+    state = _load_pending_images()
+    awaiting = state.get("awaiting")
+    if not awaiting:
+        return  # foto sem pendência ativa — ignora
+
+    photos = message.get("photo", [])
+    if not photos:
+        return
+    file_id = photos[-1]["file_id"]  # maior resolução
+
+    # Baixa o arquivo do Telegram
+    info = _api("getFile", json={"file_id": file_id})
+    file_path = info.get("result", {}).get("file_path", "")
+    if not file_path:
+        _send_text("❌ Não consegui baixar a foto. Tente novamente.")
+        return
+    url = f"https://api.telegram.org/file/bot{_token()}/{file_path}"
+    resp = requests.get(url, timeout=60)
+
+    msg_id = awaiting["msg_id"]
+    entry = state["cards"].get(msg_id)
+    if not entry:
+        state["awaiting"] = None
+        _save_pending_images(state)
+        return
+
+    raw_path = PROJECT_DIR / ".tmp" / f"{entry['slug']}_telegram.jpg"
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.write_bytes(resp.content)
+
+    # Limpa a pendência antes de completar (evita reuso duplo)
+    state["cards"].pop(msg_id, None)
+    state["awaiting"] = None
+    _save_pending_images(state)
+    _api("editMessageReplyMarkup", json={
+        "chat_id": _chat_id(), "message_id": int(msg_id),
+        "reply_markup": json.dumps({"inline_keyboard": []})})
+
+    _send_text(f"✅ Foto recebida! Processando o post #{entry['post_id']}...")
+    _completar_com_imagem(entry, str(raw_path))
+
+
 # ─── Loop principal ────────────────────────────────────────────────────────────
 
 def run_bot() -> None:
@@ -226,7 +371,7 @@ def run_bot() -> None:
                 json={
                     "offset": offset,
                     "timeout": POLL_TIMEOUT,
-                    "allowed_updates": ["callback_query"],
+                    "allowed_updates": ["callback_query", "message"],
                 },
             )
 
@@ -257,6 +402,11 @@ def run_bot() -> None:
                     seen_update_ids.clear()
                     seen_update_ids.add(update_id)
 
+                msg = update.get("message")
+                if msg and msg.get("photo"):
+                    _handle_photo_message(msg)
+                    continue
+
                 cb = update.get("callback_query")
                 if not cb:
                     continue
@@ -272,6 +422,10 @@ def run_bot() -> None:
                     # Callback de produção de pauta
                     pauta_id = data_str.split(":", 1)[1]
                     _handle_produce(pauta_id, cb_id, msg_id)
+
+                elif data_str.startswith(("usethis:", "sendphoto:")):
+                    action, pid = data_str.split(":", 1)
+                    _handle_image_callback(action, pid, cb_id, msg_id)
 
                 else:
                     # Callback de aprovação: publish:id:row ou discard:id:row
