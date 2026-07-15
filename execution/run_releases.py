@@ -189,77 +189,75 @@ def _imagem_relevante(image_path: str, titulo: str) -> str:
         return "no"
 
 
-def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | None = None) -> tuple[str, str]:
+def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | None = None) -> dict:
     """
-    Seleciona ou gera imagem de capa.
-
-    Prioridade estrita:
-      1) Fotos do próprio email (anexos diretos ou álbuns Flickr baixados pelo gmail_fetch)
-         — tenta TODAS as fotos em ordem de score, aceita a primeira que _imagem_relevante aprovar.
-         Fotos reais do evento/local sempre preferidas sobre qualquer imagem gerada.
-      2) Banco de fotos gratuito (Unsplash → Pexels) — só se não houver NENHUMA foto do email.
-      3) Geração por IA (Gemini → OpenAI) — último recurso absoluto.
-
-    Retorna (cover_path, foto_credit).
+    Seleciona imagem de capa. Prioridade: fotos do email > banco de imagens.
+    Retorna dict:
+      cover_path        — capa aprovada ("" se nenhuma)
+      credit            — crédito da capa
+      suggestion_path   — melhor candidata NÃO validada (para o card de pendência)
+      suggestion_credit — crédito da sugestão
     """
     if fatos is None:
         fatos = {}
+    vazio = {"cover_path": "", "credit": "", "suggestion_path": "", "suggestion_credit": ""}
     attachments = email.get("attachments", [])
+    sugestao_path, sugestao_credit = "", ""
 
     if attachments:
-        # Pontua e ordena todas as fotos do email por score (melhor primeiro)
-        import subprocess as _sp
         scored = []
         for att in attachments:
             r = _run_json([str(SCRIPT_DIR / "image_select.py"), "--images", att])
             if r and r.get("score", -1) >= 0:
                 scored.append(r)
         scored.sort(key=lambda x: x.get("score", 0), reverse=True)
-
         print(f"[run_releases] {len(scored)} foto(s) do email para avaliar.", file=sys.stderr)
 
         for candidate in scored:
             cpath = candidate.get("path")
-            if not cpath:
-                continue
-            if not _imagem_adequada_para_arte(cpath):
-                print(f"[run_releases] Foto baixa resolução, pulando: {Path(cpath).name}", file=sys.stderr)
+            if not cpath or not _imagem_adequada_para_arte(cpath):
                 continue
             veredito = _imagem_relevante(cpath, titulo) if titulo else "yes"
             if veredito == "no":
-                print(f"[run_releases] Foto do email rejeitada (vision): {Path(cpath).name}", file=sys.stderr)
+                print(f"[run_releases] Foto rejeitada (vision): {Path(cpath).name}", file=sys.stderr)
                 continue
-            # Foto aprovada — processa e retorna
             proc_result = _run_json([
                 str(SCRIPT_DIR / "image_process.py"),
-                "--input", cpath,
-                "--slug", slug,
-                "--output-dir", OUTPUT_DIR,
+                "--input", cpath, "--slug", slug, "--output-dir", OUTPUT_DIR,
             ])
-            if proc_result and proc_result.get("path"):
-                print(f"[run_releases] Usando foto do email: {Path(cpath).name}", file=sys.stderr)
-                return proc_result["path"], ""
+            if not proc_result or not proc_result.get("path"):
+                continue
+            if veredito == "unavailable":
+                # Vision fora do ar: foto do email vira sugestão, não capa automática
+                if not sugestao_path:
+                    sugestao_path, sugestao_credit = proc_result["path"], ""
+                    print(f"[run_releases] Vision indisponível — foto vira sugestão.", file=sys.stderr)
+                continue
+            print(f"[run_releases] Usando foto do email: {Path(cpath).name}", file=sys.stderr)
+            return {**vazio, "cover_path": proc_result["path"]}
 
-        print(f"[run_releases] Nenhuma foto do email aprovada. Tentando bancos de imagem.", file=sys.stderr)
+        print(f"[run_releases] Nenhuma foto do email aprovada.", file=sys.stderr)
 
-    # Só chega aqui se não havia fotos no email ou todas foram rejeitadas pela vision.
-    # Tenta Unsplash/Pexels antes de gerar por IA.
+    # Banco de imagens (Unsplash/Pexels/IA)
     from editorial import query_from_fatos
     img_query = query_from_fatos(fatos, titulo)
-    print(f"[run_releases] Buscando imagem em bancos gratuitos | query='{img_query}'...", file=sys.stderr)
+    print(f"[run_releases] Buscando em bancos | query='{img_query}'...", file=sys.stderr)
     gen_result = _run_json([
         str(SCRIPT_DIR / "image_generate.py"),
-        "--query", img_query,
-        "--slug", slug,
-        "--titulo", titulo,
-        "--output-dir", OUTPUT_DIR,
+        "--query", img_query, "--slug", slug,
+        "--titulo", titulo, "--output-dir", OUTPUT_DIR,
     ])
     if gen_result and gen_result.get("path"):
-        source = gen_result.get("source", "?")
-        print(f"[run_releases] Imagem obtida via {source}.", file=sys.stderr)
-        return gen_result["path"], gen_result.get("credit", "")
+        if gen_result.get("validated"):
+            return {**vazio,
+                    "cover_path": gen_result["path"],
+                    "credit": gen_result.get("credit", "")}
+        # Candidato não validado — vira sugestão (se ainda não temos uma do email)
+        if not sugestao_path:
+            sugestao_path = gen_result["path"]
+            sugestao_credit = gen_result.get("credit", "")
 
-    return "", ""
+    return {**vazio, "suggestion_path": sugestao_path, "suggestion_credit": sugestao_credit}
 
 
 def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
@@ -344,9 +342,9 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}
 
     # 4. Pipeline de imagem (usa fatos para query — sem LLM extra)
-    cover_path, foto_credit_gerada = _pipeline_imagem(email, slug, titulo, fatos=fatos)
-    if not cover_path:
-        print(f"[run_releases]   Aviso: sem imagem de capa.", file=sys.stderr)
+    img = _pipeline_imagem(email, slug, titulo, fatos=fatos)
+    cover_path = img["cover_path"]
+    foto_credit_gerada = img["credit"]
 
     # Crédito de foto: release > gerada > Divulgação
     foto_credit = creditos.get("fotos") or foto_credit_gerada or "Divulgação"
@@ -467,19 +465,42 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         ])
 
     # 12. Notifica Telegram com card enriquecido
-    notify_args = [
-        str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
-        "--post-id", str(post_id),
-        "--title", titulo,
-        "--summary", post.get("resumo_telegram", html[:300].replace("<", "").replace(">", "")[:200]),
-        "--edit-url", edit_url,
-        "--cover", cover_path or "",
-        "--sheets-row-id", sheets_row_id,
-        "--card-meta", json.dumps(card_meta, ensure_ascii=False),
-    ]
-    if ig_path:
-        notify_args += ["--ig-image", ig_path, "--ig-caption", legenda_curta]
-    notify_result = _run(notify_args)
+    if cover_path:
+        # Fluxo normal: card completo de aprovação
+        notify_args = [
+            str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
+            "--post-id", str(post_id),
+            "--title", titulo,
+            "--summary", post.get("resumo_telegram", html[:300].replace("<", "").replace(">", "")[:200]),
+            "--edit-url", edit_url,
+            "--cover", cover_path,
+            "--sheets-row-id", "0",
+            "--card-meta", json.dumps(card_meta, ensure_ascii=False),
+        ]
+        if ig_path:
+            notify_args += ["--ig-image", ig_path, "--ig-caption", legenda_curta]
+        notify_result = _run(notify_args)
+    else:
+        # Sem imagem aprovada: card de pendência — humano decide a imagem
+        pending_entry = {
+            "post_id": post_id,
+            "slug": slug,
+            "titulo": titulo,
+            "category_name": CATEGORY_NAMES.get(wp_category_id, "Eventos"),
+            "art_title": post.get("texto_arte", {}).get("titulo_principal", "") or titulo,
+            "art_subtitle": post.get("texto_arte", {}).get("linha_apoio", ""),
+            "legenda_curta": legenda_curta,
+            "legenda_longa": legenda_longa,
+            "edit_url": edit_url,
+            "summary": post.get("resumo_telegram", ""),
+            "card_meta": card_meta,
+            "suggestion_path": img["suggestion_path"],
+            "suggestion_credit": img["suggestion_credit"],
+        }
+        notify_result = _run([
+            str(SCRIPT_DIR / "telegram_notify.py"), "send-image-pending",
+            "--data", json.dumps(pending_entry, ensure_ascii=False),
+        ])
     if notify_result.returncode != 0:
         print(f"[run_releases]   Aviso: telegram_notify falhou ({notify_result.returncode}):\n{notify_result.stderr[:300]}", file=sys.stderr)
 
