@@ -282,6 +282,78 @@ def _save_pending_pautas(data: dict) -> None:
     PENDING_PAUTAS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+PENDING_IMAGES_FILE = Path(".tmp/pending_images.json")
+
+
+def _load_pending_images() -> dict:
+    if PENDING_IMAGES_FILE.exists():
+        data = json.loads(PENDING_IMAGES_FILE.read_text(encoding="utf-8"))
+    else:
+        data = {}
+    data.setdefault("cards", {})
+    data.setdefault("awaiting", None)
+    return data
+
+
+def _save_pending_images(data: dict) -> None:
+    PENDING_IMAGES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PENDING_IMAGES_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def cmd_send_image_pending(data: dict) -> dict:
+    """
+    Card de imagem pendente: rascunho criado sem imagem destacada.
+    Botões: [Usar sugestão] (se houver) e [Vou enviar foto].
+    """
+    post_id = data["post_id"]
+    titulo = data.get("titulo", "")
+    edit_url = data.get("edit_url", "")
+    suggestion_path = data.get("suggestion_path", "")
+    suggestion_credit = data.get("suggestion_credit", "")
+
+    texto = (
+        f"⚠️ *Sem imagem adequada*\n\n"
+        f"📰 {_escape(titulo)}\n\n"
+        f"O rascunho foi criado sem imagem destacada\\. "
+        f"Escolha uma opção abaixo ou edite direto no WP\\.\n\n"
+        f"[Editar rascunho]({edit_url})"
+    )
+
+    row = []
+    if suggestion_path and Path(suggestion_path).exists():
+        row.append({"text": "✔️ Usar sugestão", "callback_data": f"usethis:{post_id}"})
+    row.append({"text": "📷 Vou enviar foto", "callback_data": f"sendphoto:{post_id}"})
+    keyboard = {"inline_keyboard": [row]}
+
+    if suggestion_path and Path(suggestion_path).exists():
+        caption = texto
+        if suggestion_credit:
+            caption += f"\n\n_Sugestão: {_escape(suggestion_credit)}_"
+        if len(caption) > 1024:
+            caption = caption[:1021] + "…"
+        with Path(suggestion_path).open("rb") as f:
+            result = _api("sendPhoto", data={
+                "chat_id": _chat_id(), "caption": caption,
+                "parse_mode": "MarkdownV2",
+                "reply_markup": json.dumps(keyboard),
+            }, files={"photo": f})
+    else:
+        result = _api("sendMessage", json={
+            "chat_id": _chat_id(), "text": texto,
+            "parse_mode": "MarkdownV2", "reply_markup": keyboard,
+        })
+
+    if result.get("ok"):
+        msg_id = str(result["result"]["message_id"])
+        state = _load_pending_images()
+        state["cards"][msg_id] = data
+        _save_pending_images(state)
+        print(f"Card de imagem pendente enviado. message_id={msg_id}", file=sys.stderr)
+        return {"ok": True, "message_id": int(msg_id)}
+    return {"ok": False, "error": result}
+
+
 def cmd_send_pauta_list(pautas: list[dict]) -> dict:
     """
     Envia lista de sugestões de pauta com botões [Produzir N].
@@ -549,6 +621,9 @@ def main() -> None:
     p_spl.add_argument("--data", required=True,
                         help='JSON array: [{"pauta_id":"3","numero":1,"titulo":"..."}]')
 
+    p_sip = subparsers.add_parser("send-image-pending", help="Card de rascunho sem imagem")
+    p_sip.add_argument("--data", required=True, help="JSON com entry de imagem pendente")
+
     p_st = subparsers.add_parser("send-text", help="Envia mensagem de texto")
     p_st.add_argument("--message", required=True)
 
@@ -560,6 +635,8 @@ def main() -> None:
 
     if args.command == "send-pauta-list":
         result = cmd_send_pauta_list(json.loads(args.data))
+    elif args.command == "send-image-pending":
+        result = cmd_send_image_pending(json.loads(args.data))
     elif args.command == "send-release":
         card_meta_parsed = None
         if args.card_meta:
