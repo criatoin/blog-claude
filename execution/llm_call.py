@@ -28,8 +28,14 @@ load_dotenv()
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "deepseek/deepseek-chat"
+DEFAULT_CREATIVE_MODEL = "google/gemini-2.5-flash"
 TIMEOUT_SECS = 60
 MAX_RETRIES = 3
+
+
+def creative_model() -> str:
+    """Modelo para tarefas de escrita criativa (legenda, arte, HTML, curadoria)."""
+    return os.getenv("CREATIVE_MODEL", DEFAULT_CREATIVE_MODEL)
 
 
 def llm_call(
@@ -38,6 +44,7 @@ def llm_call(
     model: str | None = None,
     temperature: float = 0.3,
     max_tokens: int = 4096,
+    json_mode: bool = False,
 ) -> str:
     """
     Chama a OpenRouter API e retorna o texto da resposta.
@@ -76,6 +83,10 @@ def llm_call(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+
+    if json_mode:
+        # Força a API a devolver JSON válido (structured output do OpenRouter)
+        payload["response_format"] = {"type": "json_object"}
 
     last_error: Exception | None = None
 
@@ -134,7 +145,7 @@ def llm_call_json(system: str, user: str, model: str | None = None) -> dict | li
     Raises:
         RuntimeError: Se não conseguir parsear JSON
     """
-    raw = llm_call(system=system, user=user, model=model)
+    raw = llm_call(system=system, user=user, model=model, json_mode=True)
     text = raw.strip()
 
     def _extract_json_block(s: str) -> str:
