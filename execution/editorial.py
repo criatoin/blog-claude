@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import llm_call as _llm
+
 EDITORIAL_MODEL = os.getenv("EDITORIAL_MODEL", "deepseek/deepseek-chat")
 
 _VOZ_EDITORIAL = """
@@ -42,8 +44,6 @@ def extrair_fatos(release_text: str) -> dict:
     Extrai fatos estruturados do release.
     Fallback: dict com todos os campos vazios se LLM falhar.
     """
-    from llm_call import llm_call_json
-
     _FATOS_VAZIOS = {
         "cidade": "", "local": "", "endereco": "", "data": "", "horario": "",
         "periodo": "", "valor": "", "gratuito": None, "inscricao_necessaria": None,
@@ -81,7 +81,7 @@ Retorne APENAS um objeto JSON com exatamente estes campos:
 }"""
 
     try:
-        result = llm_call_json(system=system, user=release_text[:6000], model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=release_text[:6000], model=EDITORIAL_MODEL)
         if isinstance(result, dict):
             return {**_FATOS_VAZIOS, **result}
         return _FATOS_VAZIOS
@@ -95,8 +95,6 @@ def avaliar_relevancia(release_text: str, fatos: dict) -> dict:
     Avalia relevância editorial com scores numéricos.
     Fallback conservador: relevante=False.
     """
-    from llm_call import llm_call_json
-
     _FALLBACK = {
         "relevante": False,
         "cidade": "",
@@ -147,7 +145,7 @@ Release original (primeiros 3000 chars):
 {release_text[:3000]}"""
 
     try:
-        result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
         if isinstance(result, dict) and "relevante" in result:
             return result
         return _FALLBACK
@@ -161,8 +159,6 @@ def extract_editorial_hierarchy(release_text: str, fatos: dict) -> dict:
     Classifica informações do release em hierarquia editorial.
     Define foco_principal, serviço, atividades passadas e ângulo para arte/legenda.
     """
-    from llm_call import llm_call_json
-
     _FALLBACK = {
         "foco_principal": fatos.get("resumo_factual", ""),
         "servico_principal": {
@@ -243,7 +239,7 @@ Responda apenas em JSON válido:
     user = f"Fatos extraídos:\n{fatos_str}\n\nRelease:\n{release_text[:5000]}"
 
     try:
-        result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
         if isinstance(result, dict) and result.get("foco_principal"):
             return {**_FALLBACK, **result}
         return _FALLBACK
@@ -316,8 +312,6 @@ def gerar_conteudo(
     sender: usado como fallback para creditos_wordpress.texto.
     hierarchy: hierarquia editorial para guiar arte e foco.
     """
-    from llm_call import llm_call_json
-
     angulo = avaliacao.get("angulo_recomendado", "")
     angulo_instrucao = f"ÂNGULO EDITORIAL: {angulo}\n\n" if angulo else ""
 
@@ -431,6 +425,7 @@ REGRAS DE CRÉDITO (campo creditos_wordpress)
             "fotos": fatos.get("creditos_fotos") or "Divulgação",
             "usar_apenas_no_html_wordpress": True,
         },
+        "_fallback": "conteúdo gerado por fallback — revisar manualmente",
     }
 
     fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
@@ -441,7 +436,7 @@ Release original:
 {release_text[:6000]}"""
 
     try:
-        result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=user, model=_llm.creative_model())
         if isinstance(result, dict) and result.get("titulo_site"):
             if "creditos_wordpress" in result:
                 result["creditos_wordpress"]["usar_apenas_no_html_wordpress"] = True
@@ -464,8 +459,6 @@ def gerar_legenda(
     hierarchy: hierarquia editorial para guiar foco e evitar termos proibidos.
     Sem créditos — créditos são exclusivos do HTML WordPress.
     """
-    from llm_call import llm_call_json
-
     _FALLBACK_servico = hierarchy.get("servico_principal", {}) if hierarchy else {}
     _fallback_contexto = ""
     if _FALLBACK_servico.get("evento"):
@@ -487,6 +480,7 @@ def gerar_legenda(
         ),
         "legenda_contexto": _fallback_contexto,
         "cta_sugerido": "",
+        "_fallback": "legenda gerada por fallback — revisar manualmente",
     }
 
     arte = arte_instagram or {}
@@ -638,7 +632,7 @@ Retorne APENAS um objeto JSON válido:
         return erros
 
     try:
-        result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=user, model=_llm.creative_model())
         if not (isinstance(result, dict) and result.get("legenda_curta")):
             return _FALLBACK
 
@@ -668,7 +662,7 @@ Retorne APENAS um objeto JSON válido:
                 f"Formato dos campos: blocos separados por \\n\\n (dois backslash-n)."
             )
             try:
-                result2 = llm_call_json(system=system, user=user_retry, model=EDITORIAL_MODEL)
+                result2 = _llm.llm_call_json(system=system, user=user_retry, model=_llm.creative_model())
                 if isinstance(result2, dict) and result2.get("legenda_curta"):
                     for campo in ("legenda_curta", "legenda_contexto"):
                         if campo in result2:
@@ -696,8 +690,6 @@ def validar_fatos(release_text: str, fatos: dict, post: dict) -> dict:
     Valida se o conteúdo gerado é fiel ao release original.
     Fallback aprovador: não bloqueia o pipeline se o validador falhar.
     """
-    from llm_call import llm_call_json
-
     _FALLBACK_APROVADO = {
         "aprovado": True,
         "risco_alucinacao": "baixo",
@@ -741,7 +733,7 @@ HTML (parcial): {html_sem_tags}
 Legenda IG: {post.get("legenda_curta", "")}"""
 
     try:
-        result = llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
         if isinstance(result, dict) and "aprovado" in result:
             return result
         return _FALLBACK_APROVADO
@@ -757,6 +749,8 @@ def resumo_telegram(post: dict, validacao: dict, avaliacao: dict) -> dict:
     """
     risco = validacao.get("risco_alucinacao", "baixo")
     alertas = []
+    if post.get("_fallback"):
+        alertas.append(post["_fallback"])
     if risco in ("medio", "alto"):
         for p in (validacao.get("problemas") or []):
             if p.get("trecho"):
@@ -951,8 +945,6 @@ def gerar_arte_com_validacao(
     hierarchy: hierarquia editorial para guiar o foco da arte.
     Retorna o dict completo de gerar_conteudo com texto_arte validado.
     """
-    from llm_call import llm_call_json
-
     # Tentativa 1: geração com hierarquia
     post = gerar_conteudo(release_text, fatos, avaliacao, sender=sender, hierarchy=hierarchy)
     arte = post.get("texto_arte", {})
@@ -1012,7 +1004,7 @@ Retorne APENAS o objeto texto_arte corrigido em JSON:
 }}"""
 
         try:
-            arte_retry = llm_call_json(system=system_retry, user=f"Release:\n{release_text[:3000]}", model=EDITORIAL_MODEL)
+            arte_retry = _llm.llm_call_json(system=system_retry, user=f"Release:\n{release_text[:3000]}", model=_llm.creative_model())
             if isinstance(arte_retry, dict) and arte_retry.get("titulo_principal"):
                 erros2 = _erros_criticos_arte(arte_retry, fatos, release_titulo)
                 if not erros2:
