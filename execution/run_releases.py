@@ -3,13 +3,12 @@ run_releases.py — Pipeline autônomo de releases: Gmail → WP rascunho → Te
 
 Fluxo:
   1. gmail_fetch.py → lista de emails não lidos
-  2. Para cada email: llm_call() avalia relevância
-     → não relevante: sheets_write.py log-release (relevante=Não) e pula
+  2. Para cada email: llm_call() avalia relevância → não relevante: pula
   3. llm_call() reescreve post → JSON {titulo, slug, html, wp_category_id, credito_imagem}
-  4. Pipeline imagem: image_select.py (anexos) → image_process.py ou image_generate.py
-  5. instagram_image.py + legenda via llm_call()
-  6. wp_publish.py create --category-id <id>
-  7. sheets_write.py log-release + sheets_write.py legenda-ig
+  4. Dedup por slug: wp_publish.py find --slug <slug> (já existe no WP? pula)
+  5. Pipeline imagem: image_select.py (anexos) → image_process.py ou image_generate.py
+  6. instagram_image.py + legenda via llm_call()
+  7. wp_publish.py create --category-id <id>
   8. telegram_notify.py send-release (SEM --listen — bot daemon cuida dos callbacks)
   9. Imprime resumo
 
@@ -53,24 +52,6 @@ def _load_processed() -> set:
     if PROCESSED_FILE.exists():
         return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
     return set()
-
-
-def _load_processed_from_sheets() -> set:
-    """
-    Lê Log Releases do Sheets e retorna set de (assunto_lower, sender_lower) já processados.
-    Serve como dedup persistente: sobrevive ao restart do container mesmo sem processed_emails.json.
-    """
-    try:
-        result = _run_json([str(SCRIPT_DIR / "sheets_read.py"), "log"])
-        if not result:
-            return set()
-        return {
-            (r.get("assunto", "").strip().lower(), r.get("origem_email", "").strip().lower())
-            for r in result
-        }
-    except Exception as e:
-        print(f"[run_releases] Aviso: falha ao carregar dedup do Sheets: {e}", file=sys.stderr)
-        return set()
 
 
 def _mark_processed(email_id: str) -> None:
@@ -260,7 +241,7 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | Non
     return {**vazio, "suggestion_path": sugestao_path, "suggestion_credit": sugestao_credit}
 
 
-def processar_email(email: dict, dry_run: bool = False, processed_subjects: set | None = None) -> dict:
+def processar_email(email: dict, dry_run: bool = False) -> dict:
     """Processa um email pelo pipeline completo. Retorna dict com resultado."""
     from editorial import (
         extrair_fatos, avaliar_relevancia, extract_editorial_hierarchy,
@@ -275,17 +256,10 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     date = email.get("date", "")
     body_text = email.get("body_text", "") or email.get("body_html", "")[:8000]
 
-    # Deduplicação 1: arquivo local
+    # Deduplicação: arquivo local
     if not dry_run and email_id in _load_processed():
         print(f"\n[run_releases] → Já processado (arquivo), pulando: {subject[:60]}", file=sys.stderr)
         return {"email_id": email_id, "relevante": False, "motivo": "Já processado anteriormente"}
-
-    # Deduplicação 2: Sheets (persistente)
-    if not dry_run and processed_subjects is not None:
-        key = (subject.strip().lower(), sender.strip().lower())
-        if key in processed_subjects:
-            print(f"\n[run_releases] → Já na planilha, pulando: {subject[:60]}", file=sys.stderr)
-            return {"email_id": email_id, "relevante": False, "motivo": "Já registrado na planilha"}
 
     print(f"\n[run_releases] → Processando: {subject[:60]}", file=sys.stderr)
 
@@ -301,15 +275,6 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     if not relevante:
         motivo = avaliacao.get("motivo_aprovacao_ou_descarte", "Não relevante")
         print(f"[run_releases]   Não relevante: {motivo}", file=sys.stderr)
-        if not dry_run:
-            _run_json([
-                str(SCRIPT_DIR / "sheets_write.py"), "log-release",
-                "--data", json.dumps({
-                    "sender": sender, "subject": subject, "date": date,
-                    "relevante": False, "status": "Descartado",
-                    "motivo_descarte": motivo,
-                }, ensure_ascii=False),
-            ])
         return {"email_id": email_id, "relevante": False, "motivo": motivo}
 
     # 3. Hierarquia editorial — define foco antes de gerar arte e legenda
@@ -340,6 +305,13 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
 
     if dry_run:
         return {"email_id": email_id, "relevante": True, "titulo": titulo, "slug": slug, "dry_run": True}
+
+    # Dedup persistente: já existe post com este slug no WP?
+    existente = _run_json([str(SCRIPT_DIR / "wp_publish.py"), "find", "--slug", slug])
+    if existente and existente.get("exists"):
+        print(f"[run_releases]   Post já existe no WP (#{existente['post_id']}), pulando.", file=sys.stderr)
+        _mark_processed(email_id)
+        return {"email_id": email_id, "relevante": True, "motivo": "Duplicado no WP"}
 
     # 4. Pipeline de imagem (usa fatos para query — sem LLM extra)
     img = _pipeline_imagem(email, slug, titulo, fatos=fatos)
@@ -439,32 +411,7 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     post_id = wp_result.get("post_id")
     edit_url = wp_result.get("edit_url", "")
 
-    # 11. Registra no Sheets
-    sheets_log = _run_json([
-        str(SCRIPT_DIR / "sheets_write.py"), "log-release",
-        "--data", json.dumps({
-            "sender": sender, "subject": subject, "date": date,
-            "relevante": True, "status": "Aguardando aprovação",
-            "link_post": edit_url,
-        }, ensure_ascii=False),
-    ])
-    sheets_row_id = sheets_log.get("row_id", "0") if sheets_log else "0"
-
-    if ig_url:
-        _run_json([
-            str(SCRIPT_DIR / "sheets_write.py"), "legenda-ig",
-            "--data", json.dumps({
-                "id_post": str(post_id),
-                "titulo": titulo,
-                "legenda": legenda_curta,
-                "hashtags": " ".join(hashtags),
-                "status": "Pronta",
-                "path_imagem": ig_url,
-                "legenda_longa": legenda_longa,
-            }, ensure_ascii=False),
-        ])
-
-    # 12. Notifica Telegram com card enriquecido
+    # 11. Notifica Telegram com card enriquecido
     if cover_path:
         # Fluxo normal: card completo de aprovação
         notify_args = [
@@ -511,7 +458,6 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
         "relevante": True,
         "titulo": titulo,
         "post_id": post_id,
-        "sheets_row_id": sheets_row_id,
         "risco_alucinacao": risco,
     }
 
@@ -541,13 +487,9 @@ def main() -> None:
         print("[run_releases] Nenhum email novo. Encerrando.", file=sys.stderr)
         sys.exit(0)
 
-    # Carrega dedup persistente do Sheets uma única vez (evita chamada por email)
-    processed_subjects = _load_processed_from_sheets()
-    print(f"[run_releases] {len(processed_subjects)} entradas já na planilha (dedup persistente).", file=sys.stderr)
-
     resultados = []
     for email in emails:
-        resultado = processar_email(email, dry_run=args.dry_run, processed_subjects=processed_subjects)
+        resultado = processar_email(email, dry_run=args.dry_run)
         resultados.append(resultado)
 
     # Resumo

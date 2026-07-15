@@ -2,8 +2,8 @@
 telegram_notify.py — Envia notificações para o Telegram com botões inline
 e processa as respostas ([✅ Site] / [📸 Instagram] / [🗑 Descartar]).
 
-Botão Instagram: marca status "Aprovado" na aba Legendas IG da planilha.
-O usuário posta manualmente a partir da planilha (sem API do Instagram).
+Botão Instagram: apenas notifica o usuário — ele copia a arte/legenda enviadas
+no card e posta manualmente (sem API do Instagram, sem Sheets).
 
 Autenticação: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID no .env
 
@@ -525,7 +525,7 @@ def cmd_listen(timeout_secs: int = 1800) -> dict:
 
 def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
                     ig_image_path: str = "", ig_caption: str = "") -> dict:
-    """Executa Publicar (site), Publicar IG ou Descartar e atualiza o Sheets."""
+    """Executa Publicar (site), Aprovar IG ou Descartar. (sheets_row_id: legado, ignorado)"""
     import subprocess
     script_dir = Path(__file__).parent
 
@@ -539,22 +539,12 @@ def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
         url = wp_data.get("url", "")
         cmd_send_text(f"✅ <b>Publicado!</b>\n{url}" if url else f"✅ Post #{post_id} publicado.")
 
-        # Atualiza Sheets
-        subprocess.run(
-            ["python3", str(script_dir / "sheets_write.py"), "update-status",
-             "--tab", "Log Releases", "--row-id", sheets_row_id, "--status", new_status],
-            capture_output=True,
-        )
-
     elif action == "publish_ig":
-        # Apenas marca como Aprovado na planilha — o usuário posta manualmente
         new_status = "Aprovado"
-        subprocess.run(
-            ["python3", str(script_dir / "sheets_write.py"), "update-status",
-             "--tab", "Legendas IG", "--row-id", str(post_id), "--status", new_status],
-            capture_output=True,
+        cmd_send_text(
+            f"📸 Post #{post_id} aprovado para Instagram.\n"
+            f"A arte e a legenda estão na mensagem acima — copie e poste."
         )
-        cmd_send_text(f"📸 Post #{post_id} aprovado para Instagram. Confira a planilha Legendas IG.")
 
     else:  # discard
         subprocess.run(
@@ -563,13 +553,6 @@ def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
         )
         new_status = "Descartado"
         cmd_send_text(f"🗑 Post #{post_id} descartado por {user}.")
-
-        # Atualiza Sheets
-        subprocess.run(
-            ["python3", str(script_dir / "sheets_write.py"), "update-status",
-             "--tab", "Log Releases", "--row-id", sheets_row_id, "--status", new_status],
-            capture_output=True,
-        )
 
     return {"post_id": post_id, "action": action, "status": new_status}
 

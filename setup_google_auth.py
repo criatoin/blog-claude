@@ -2,7 +2,6 @@
 setup_google_auth.py — Gera um novo refresh token Google com todos os escopos necessários.
 
 Escopos incluídos:
-  - Google Sheets (leitura/escrita)
   - Google Search Console (leitura)
   - Google Analytics 4 (leitura)
 
@@ -13,7 +12,6 @@ Abre o navegador para autorização. Após autorizar, exibe o novo GOOGLE_REFRES
 para copiar no .env.
 """
 
-import json
 import os
 import sys
 
@@ -23,7 +21,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 load_dotenv()
 
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/webmasters.readonly",
     "https://www.googleapis.com/auth/analytics.readonly",
 ]
@@ -62,11 +59,6 @@ def main() -> None:
     print(f"\nNovo GOOGLE_REFRESH_TOKEN:\n{creds.refresh_token}")
     print("\nCopie e substitua o valor de GOOGLE_REFRESH_TOKEN no arquivo .env")
     print("=" * 60)
-
-    # Salva token_sheets.json (já válido com novos escopos)
-    with open("token_sheets.json", "w") as f:
-        f.write(creds.to_json())
-    print("\ntoken_sheets.json atualizado com os novos escopos.")
 
 
 if __name__ == "__main__":

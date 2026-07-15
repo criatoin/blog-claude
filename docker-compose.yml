@@ -7,7 +7,7 @@
 # Em produção (Coolify):
 #   - Apenas o serviço telegram-bot precisa ser deployado
 #   - Os cron jobs (releases/pauta) rodam via crontab dentro do container
-#   - O start.sh reconstrói os tokens OAuth de GMAIL_TOKEN_B64 e SHEETS_TOKEN_B64
+#   - O start.sh reconstrói o token OAuth de GMAIL_TOKEN_B64
 #
 # IMPORTANTE: Nunca commite o arquivo .env. Configure as variáveis
 #             pelo painel do Coolify (Environment Variables).
