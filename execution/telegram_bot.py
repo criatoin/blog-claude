@@ -242,8 +242,10 @@ def _completar_com_imagem(entry: dict, raw_image_path: str) -> None:
     cover_path = proc["path"]
 
     # 2. Define imagem destacada no WP
-    _run_json_local([str(SCRIPT_DIR / "wp_publish.py"), "set-featured",
+    featured = _run_json_local([str(SCRIPT_DIR / "wp_publish.py"), "set-featured",
                      "--post-id", str(post_id), "--image-path", cover_path])
+    if not featured:
+        _send_text(f"⚠️ Não consegui definir a imagem destacada do post #{post_id}. Confira manualmente — o restante do fluxo continua.")
 
     # 3. Gera arte IG e sobe para o WP Media
     ig_path = ""
@@ -259,9 +261,11 @@ def _completar_com_imagem(entry: dict, raw_image_path: str) -> None:
     if ig_result:
         ig_path = ig_result.get("path", "")
         if ig_path:
-            _run_json_local([str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
+            uploaded = _run_json_local([str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
                              "--image-path", ig_path,
                              "--title", f"{entry.get('titulo', '')} — Instagram"])
+            if not uploaded:
+                _send_text(f"⚠️ Não consegui subir a arte do Instagram para a biblioteca de mídia do WP (post #{post_id}). A arte local ainda será enviada no card de aprovação.")
 
     # 4. Envia o card de aprovação completo
     notify_args = [str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
