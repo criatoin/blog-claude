@@ -353,15 +353,8 @@ def processar_email(email: dict, dry_run: bool = False, processed_subjects: set 
     ig_url = ""
     if cover_path and Path(cover_path).exists():
         category_name = CATEGORY_NAMES.get(wp_category_id, "Eventos")
-        art_title = post.get("texto_arte", {}).get("titulo_principal", "")
+        art_title = post.get("texto_arte", {}).get("titulo_principal", "") or titulo
         art_subtitle = post.get("texto_arte", {}).get("linha_apoio", "")
-        # Garante mínimo de 4 palavras no título da arte
-        _art = art_title if art_title else titulo
-        if len(_art.split()) < 4:
-            _art = titulo  # tenta o título completo do post
-        if len(_art.split()) < 4:
-            _art = _art + " " + category_name  # expande com categoria
-        art_title = _art
         ig_args = [
             str(SCRIPT_DIR / "instagram_image.py"),
             "--cover", cover_path,
