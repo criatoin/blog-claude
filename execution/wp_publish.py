@@ -6,6 +6,8 @@ Uso:
     python execution/wp_publish.py publish --post-id 123
     python execution/wp_publish.py trash --post-id 123
     python execution/wp_publish.py upload-image --image-path .tmp/img.webp --title "Alt text"
+    python execution/wp_publish.py find --slug meu-post | --search "termo"
+    python execution/wp_publish.py set-featured --post-id 123 --image-path .tmp/img.webp
 
 Saída: JSON para stdout
 """
@@ -188,6 +190,43 @@ def trash_post(post_id: int) -> dict:
     }
 
 
+def find_post(slug: str = "", search: str = "") -> dict:
+    """Verifica se já existe post (qualquer status) com este slug ou busca textual."""
+    wp_url, auth = get_config()
+    params: dict = {"status": "publish,draft,pending,future", "per_page": 5}
+    if slug:
+        params["slug"] = slug
+    elif search:
+        params["search"] = search
+    else:
+        print("Erro: informe --slug ou --search", file=sys.stderr)
+        sys.exit(1)
+
+    resp = requests.get(f"{wp_url}/wp-json/wp/v2/posts", params=params, auth=auth)
+    if not resp.ok:
+        # Em erro de API, assume que não existe (não bloqueia o pipeline)
+        print(f"Aviso: find falhou ({resp.status_code}) — assumindo inexistente", file=sys.stderr)
+        return {"exists": False, "post_id": None, "status": ""}
+
+    posts = resp.json()
+    if posts:
+        return {"exists": True, "post_id": posts[0]["id"], "status": posts[0].get("status", "")}
+    return {"exists": False, "post_id": None, "status": ""}
+
+
+def set_featured(post_id: int, image_path: str) -> dict:
+    """Sobe imagem e define como destacada de um post existente."""
+    wp_url, auth = get_config()
+    up = upload_image(image_path)
+    resp = requests.post(
+        f"{wp_url}/wp-json/wp/v2/posts/{post_id}",
+        json={"featured_media": up["media_id"]},
+        auth=auth,
+    )
+    _check_response(resp)
+    return {"post_id": post_id, "media_id": up["media_id"], "url": up.get("url", "")}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gerencia posts no WordPress via REST API")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -213,6 +252,16 @@ def main() -> None:
     p_upload.add_argument("--image-path", required=True)
     p_upload.add_argument("--title", default="")
 
+    # find
+    p_find = subparsers.add_parser("find", help="Verifica se post existe por slug ou busca")
+    p_find.add_argument("--slug", default="")
+    p_find.add_argument("--search", default="")
+
+    # set-featured
+    p_sf = subparsers.add_parser("set-featured", help="Define imagem destacada de post existente")
+    p_sf.add_argument("--post-id", type=int, required=True)
+    p_sf.add_argument("--image-path", required=True)
+
     args = parser.parse_args()
 
     if args.command == "create":
@@ -224,6 +273,10 @@ def main() -> None:
         result = trash_post(args.post_id)
     elif args.command == "upload-image":
         result = upload_image(args.image_path, args.title)
+    elif args.command == "find":
+        result = find_post(slug=args.slug, search=args.search)
+    elif args.command == "set-featured":
+        result = set_featured(args.post_id, args.image_path)
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
