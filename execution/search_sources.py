@@ -45,6 +45,7 @@ def search_sources(
     query: str,
     max_results: int,
     min_score: float,
+    days: int = 0,
 ) -> dict:
     """
     Busca fontes usando Tavily e retorna resultado com flag sufficient.
@@ -65,6 +66,10 @@ def search_sources(
         "include_raw_content": False,
         "include_images": False,
     }
+
+    if days > 0:
+        body["topic"] = "news"
+        body["days"] = days
 
     try:
         resp = requests.post(TAVILY_API_URL, json=body, headers=headers, timeout=30)
@@ -117,12 +122,17 @@ def main() -> None:
         "--min-score", type=float, default=0.4,
         help="Score mínimo de relevância 0–1 (padrão: 0.4)",
     )
+    parser.add_argument(
+        "--days", type=int, default=0,
+        help="Restringe a resultados dos últimos N dias (topic=news)",
+    )
     args = parser.parse_args()
 
     result = search_sources(
         query=args.query,
         max_results=args.max,
         min_score=args.min_score,
+        days=args.days,
     )
 
     sys.stdout.buffer.write(json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8"))

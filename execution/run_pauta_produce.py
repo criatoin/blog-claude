@@ -2,16 +2,14 @@
 run_pauta_produce.py — Pipeline autônomo de produção de pauta individual.
 
 Fluxo:
-  1. sheets_read.py pauta-id --id <id>
-  2. sheets_write.py update-status --status "Produzindo"
-  3. search_sources.py --query "<keyword> <cidade>"
-     → sufficient=false: atualiza "Sem fontes", notifica Telegram, encerra
-  4. llm_call() escreve post completo com fontes
-  5. image_generate.py → (já aplica image_process.py internamente)
-  6. instagram_image.py + legenda via llm_call()
-  7. wp_publish.py create
-  8. sheets_write.py legenda-ig + update-status "Produzido"
-  9. telegram_notify.py send-release (SEM --listen — bot daemon cuida)
+  1. Lê pauta de .tmp/pautas_semana.json (gerado por run_pauta_generate.py)
+  2. Usa as fontes já coletadas na geração + 1 busca complementar
+     → sem fontes: notifica Telegram, encerra (não deveria ocorrer — validado na geração)
+  3. llm_call_json() escreve post completo com fontes (modelo criativo)
+  4. image_generate.py → (já aplica image_process.py internamente)
+  5. instagram_image.py + legenda via llm_call() (modelo criativo)
+  6. wp_publish.py create
+  7. telegram_notify.py send-release com arte/legenda IG no card (SEM --listen — bot daemon cuida)
 
 Uso:
     python execution/run_pauta_produce.py --pauta-id <id>
@@ -29,7 +27,6 @@ load_dotenv()
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
-IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")
 OUTPUT_DIR = str(PROJECT_DIR / ".tmp")
 VALID_CATEGORY_IDS = {10, 11, 12, 13, 19, 22, 23, 384, 533, 540, 561}
 CATEGORY_NAMES = {
@@ -58,15 +55,6 @@ def _run_json(args: list[str]) -> dict | list | None:
     except json.JSONDecodeError as e:
         print(f"[run_pauta_produce] JSON inválido de {Path(args[0]).name}: {e}", file=sys.stderr)
         return None
-
-
-def _update_status(pauta_id: str, status: str) -> None:
-    _run([
-        str(SCRIPT_DIR / "sheets_write.py"), "update-status",
-        "--tab", "Pautas",
-        "--row-id", pauta_id,
-        "--status", status,
-    ])
 
 
 def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
@@ -102,7 +90,7 @@ def _gerar_query_imagem(titulo: str, resumo: str = "") -> str:
 
 def _llm_escrever_post(pauta: dict, fontes: list[dict]) -> dict:
     """Escreve post completo com base na pauta e nas fontes encontradas."""
-    from llm_call import llm_call_json
+    from llm_call import llm_call_json, creative_model
 
     fontes_texto = "\n".join([
         f"- [{f.get('title', '')}]({f.get('url', '')}): {f.get('snippet', '')[:300]}"
@@ -216,14 +204,14 @@ Links para citar no HTML: {links_html}
 Escreva o post completo com base nessas fontes."""
 
     try:
-        return llm_call_json(system=system, user=user)
+        return llm_call_json(system=system, user=user, model=creative_model())
     except Exception as e:
         raise RuntimeError(f"Erro ao escrever post: {e}")
 
 
 def _llm_legenda_ig(titulo: str, html: str) -> str:
     """Gera legenda para Instagram."""
-    from llm_call import llm_call
+    from llm_call import llm_call, creative_model
 
     system = """Você é um especialista em social media com 10 anos de experiência em contas de cultura e entretenimento local.
 Cria legendas para o @maisblogoficial — portal de cultura e diversão da região de Americana/SP.
@@ -267,66 +255,57 @@ Conteúdo:
 {html[:2000]}"""
 
     try:
-        return llm_call(system=system, user=user)
+        return llm_call(system=system, user=user, model=creative_model())
     except Exception:
         return "Confira este post incrível no +blog! Link na bio.\n\n#maisblog #americana #cultura"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Produz uma pauta individual")
-    parser.add_argument("--pauta-id", required=True, help="ID da pauta na planilha Pautas")
+    parser.add_argument("--pauta-id", required=True, help="ID da pauta em .tmp/pautas_semana.json")
     args = parser.parse_args()
 
     pauta_id = args.pauta_id
     print(f"[run_pauta_produce] Produzindo pauta #{pauta_id}...", file=sys.stderr)
 
-    # 1. Lê dados da pauta
-    pauta = _run_json([
-        str(SCRIPT_DIR / "sheets_read.py"), "pauta-id",
-        "--id", pauta_id,
-    ])
+    # 1. Lê dados da pauta salva por run_pauta_generate.py
+    PAUTAS_FILE = PROJECT_DIR / ".tmp" / "pautas_semana.json"
+    if not PAUTAS_FILE.exists():
+        print(f"[run_pauta_produce] {PAUTAS_FILE} não existe — rode run_pauta_generate antes.", file=sys.stderr)
+        sys.exit(1)
+    todas = json.loads(PAUTAS_FILE.read_text(encoding="utf-8"))
+    pauta = todas.get(pauta_id)
     if not pauta:
         print(f"[run_pauta_produce] Pauta #{pauta_id} não encontrada.", file=sys.stderr)
         sys.exit(1)
 
-    keyword = pauta.get("keyword", "")
     titulo_sugerido = pauta.get("titulo", "")
-    cidade = "Americana"  # default; keyword geralmente já contém a cidade
 
     print(f"[run_pauta_produce] Pauta: {titulo_sugerido}", file=sys.stderr)
 
-    # 2. Atualiza status para "Produzindo"
-    _update_status(pauta_id, "Produzindo")
+    # 2. Fontes já coletadas na geração + busca complementar
+    fontes = list(pauta.get("fontes", []))
+    query = pauta.get("keyword") or pauta.get("titulo", "")
+    extra = _run_json([str(SCRIPT_DIR / "search_sources.py"), "--query", query, "--max", "3"])
+    if extra:
+        urls_existentes = {f.get("url") for f in fontes}
+        for s in extra.get("sources", []):
+            if s.get("url") not in urls_existentes:
+                fontes.append(s)
 
-    # 3. Busca fontes
-    query = f"{keyword} {cidade}" if cidade.lower() not in keyword.lower() else keyword
-    print(f"[run_pauta_produce] Buscando fontes: '{query}'...", file=sys.stderr)
-
-    fontes_result = _run_json([
-        str(SCRIPT_DIR / "search_sources.py"),
-        "--query", query,
-    ])
-
-    if not fontes_result or not fontes_result.get("sufficient", False):
-        motivo = "Fontes insuficientes para produzir com qualidade."
-        print(f"[run_pauta_produce] {motivo}", file=sys.stderr)
-        _update_status(pauta_id, "Sem fontes")
-        subprocess.run([
-            "python",
-            str(SCRIPT_DIR / "telegram_notify.py"), "send-text",
-            "--message", f"⚠️ Pauta #{pauta_id} — {titulo_sugerido[:50]}\n{motivo}",
-        ], cwd=str(PROJECT_DIR))
+    if not fontes:
+        print("[run_pauta_produce] Pauta sem fontes — não deveria acontecer (validada na geração).", file=sys.stderr)
+        subprocess.run(["python", str(SCRIPT_DIR / "telegram_notify.py"), "send-text",
+                        "--message", f"⚠️ Pauta #{pauta_id} sem fontes. Produção cancelada."],
+                       cwd=str(PROJECT_DIR))
         sys.exit(0)
+    print(f"[run_pauta_produce] {len(fontes)} fonte(s).", file=sys.stderr)
 
-    fontes = fontes_result.get("sources", [])
-    print(f"[run_pauta_produce] {len(fontes)} fonte(s) encontrada(s).", file=sys.stderr)
-
-    # 4. Escreve post com LLM
+    # 3. Escreve post com LLM
     try:
         post = _llm_escrever_post(pauta, fontes)
     except RuntimeError as e:
         print(f"[run_pauta_produce] {e}", file=sys.stderr)
-        _update_status(pauta_id, "Erro na produção")
         sys.exit(1)
 
     titulo = post.get("titulo", titulo_sugerido[:65])
@@ -355,7 +334,6 @@ def main() -> None:
 
     # 6. Arte Instagram
     ig_path = ""
-    ig_url = ""
     if cover_path and Path(cover_path).exists():
         category_name = CATEGORY_NAMES.get(wp_category_id, "Eventos")
         ig_result = _run_json([
@@ -368,16 +346,6 @@ def main() -> None:
         ])
         if ig_result:
             ig_path = ig_result.get("path", "")
-
-    # Upload da arte IG para WP Media Library
-    if ig_path and Path(ig_path).exists():
-        upload_result = _run_json([
-            str(SCRIPT_DIR / "wp_publish.py"), "upload-image",
-            "--image-path", ig_path,
-            "--title", f"{titulo} — Instagram",
-        ])
-        if upload_result:
-            ig_url = upload_result.get("url", "")
 
     # 7. Legenda Instagram
     legenda = _llm_legenda_ig(titulo, html)
@@ -403,36 +371,14 @@ def main() -> None:
     wp_result = _run_json(wp_args)
     if not wp_result:
         print("[run_pauta_produce] Falha ao criar rascunho no WP.", file=sys.stderr)
-        _update_status(pauta_id, "Erro na produção")
         sys.exit(1)
 
     post_id = wp_result.get("post_id")
     edit_url = wp_result.get("edit_url", "")
 
-    # 9. Salva legenda IG no Sheets
-    if ig_url:
-        _run_json([
-            str(SCRIPT_DIR / "sheets_write.py"), "legenda-ig",
-            "--data", json.dumps({
-                "id_post": str(post_id),
-                "titulo": titulo,
-                "legenda": legenda,
-                "hashtags": "",
-                "status": "Pronta",
-                "path_imagem": ig_url,
-            }, ensure_ascii=False),
-        ])
-
-    # Atualiza status da pauta
-    _update_status(pauta_id, "Produzido")
-
-    # Atualiza link_post na pauta (coluna H = index 7)
-    # Nota: update-status só atualiza coluna "status" — link_post seria outra chamada
-    # Por ora, registramos via update-status com valor composto não é possível.
-    # Deixamos o link editável no rascunho do WP.
-
-    # 10. Notifica Telegram (SEM --listen — bot daemon cuida)
-    subprocess.run([
+    # 9. Notifica Telegram (SEM --listen — bot daemon cuida)
+    # Legenda IG vai direto no card, não é mais salva no Sheets.
+    telegram_args = [
         "python",
         str(SCRIPT_DIR / "telegram_notify.py"), "send-release",
         "--post-id", str(post_id),
@@ -440,8 +386,11 @@ def main() -> None:
         "--summary", html[:300].replace("<", "").replace(">", "")[:200],
         "--edit-url", edit_url,
         "--cover", cover_path or "",
-        "--sheets-row-id", pauta_id,
-    ], cwd=str(PROJECT_DIR))
+        "--sheets-row-id", "0",
+    ]
+    if ig_path:
+        telegram_args += ["--ig-image", ig_path, "--ig-caption", legenda]
+    subprocess.run(telegram_args, cwd=str(PROJECT_DIR))
 
     print(f"[run_pauta_produce] ✅ Rascunho #{post_id} criado. Card enviado ao Telegram.", file=sys.stderr)
     print(json.dumps({
