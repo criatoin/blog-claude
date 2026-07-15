@@ -118,14 +118,16 @@ def _imagem_adequada_para_arte(image_path: str) -> bool:
         return False
 
 
-def _imagem_relevante(image_path: str, titulo: str) -> bool:
+def _imagem_relevante(image_path: str, titulo: str) -> str:
     """
     Usa Gemini Vision para verificar se a imagem é relevante ao título do post.
-    Retorna True se relevante, False se não (→ cai para Unsplash/Gemini).
+    Retorna "yes" (relevante), "no" (não relevante → cai para Unsplash/Gemini) ou
+    "unavailable" (vision não pôde rodar — sem GEMINI_API_KEY ou 503). "unavailable"
+    NUNCA deve ser tratado como aprovação automática pelo chamador.
     """
     api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
-        return True  # sem chave, aceita imagem sem verificar
+        return "unavailable"  # sem chave, não dá para verificar
 
     try:
         from google import genai
@@ -166,12 +168,12 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
         # formata os steps por extenso antes de dar a resposta final.
         import re as _re
         words = _re.findall(r"\b(yes|no)\b", response.text.strip().lower())
-        relevant = words[-1] == "yes" if words else False
-        if not relevant:
+        veredito = words[-1] if words else "no"
+        if veredito == "no":
             print(f"[run_releases] Imagem rejeitada (logo/não-foto/irrelevante) para '{titulo[:50]}' — usando Unsplash/Gemini.", file=sys.stderr)
         else:
             print(f"[run_releases] Imagem aprovada pela vision para '{titulo[:50]}'.", file=sys.stderr)
-        return relevant
+        return veredito
 
     except Exception as e:
         err_str = str(e)
@@ -181,10 +183,10 @@ def _imagem_relevante(image_path: str, titulo: str) -> bool:
             or "503 UNAVAILABLE" in err_str
         )
         if is_server_overload:
-            print(f"[run_releases] Vision API indisponível (503), aceitando foto do email sem validar.", file=sys.stderr)
-            return True
+            print(f"[run_releases] Vision API indisponível (503), foto do email vira sugestão não-validada.", file=sys.stderr)
+            return "unavailable"
         print(f"[run_releases] Aviso: verificação de relevância falhou ({e}), rejeitando imagem por precaução.", file=sys.stderr)
-        return False
+        return "no"
 
 
 def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | None = None) -> tuple[str, str]:
@@ -223,7 +225,8 @@ def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | Non
             if not _imagem_adequada_para_arte(cpath):
                 print(f"[run_releases] Foto baixa resolução, pulando: {Path(cpath).name}", file=sys.stderr)
                 continue
-            if titulo and not _imagem_relevante(cpath, titulo):
+            veredito = _imagem_relevante(cpath, titulo) if titulo else "yes"
+            if veredito == "no":
                 print(f"[run_releases] Foto do email rejeitada (vision): {Path(cpath).name}", file=sys.stderr)
                 continue
             # Foto aprovada — processa e retorna

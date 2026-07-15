@@ -46,15 +46,17 @@ def _import_openai():
 
 # ─── Validação via Gemini Vision ──────────────────────────────────────────────
 
-def _validate_image(image_path: str, titulo: str) -> bool:
+def _validate_image(image_path: str, titulo: str) -> str:
     """
     Usa Gemini Vision para validar imagem antes de aceitar.
     Rejeita se: não é foto real, não é relevante ao título, ou tem texto/banner visível.
-    Sem GEMINI_API_KEY: aceita sem validar (apenas loga aviso).
+    Retorna "yes" (aprovada), "no" (rejeitada) ou "unavailable" (vision não pôde rodar —
+    sem GEMINI_API_KEY ou 503). "unavailable" NUNCA deve ser tratado como aprovação automática
+    pelo chamador — o candidato deve virar sugestão não-validada, não capa automática.
     """
     api_key = os.getenv("GEMINI_API_KEY", "")
     if not api_key:
-        return True  # sem chave, aceita sem validar
+        return "unavailable"  # sem chave, não dá para validar
 
     try:
         from google import genai
@@ -121,10 +123,10 @@ def _validate_image(image_path: str, titulo: str) -> bool:
         # os steps por extenso antes de dar a resposta final.
         import re as _re
         words = _re.findall(r"\b(yes|no)\b", response.text.strip().lower())
-        valid = words[-1] == "yes" if words else False
-        if not valid:
-            print(f"[image_generate] Imagem rejeitada pela vision (não-foto/irrelevante/texto): {image_path}", file=sys.stderr)
-        return valid
+        veredito = words[-1] if words else "no"
+        if veredito == "no":
+            print(f"[image_generate] Imagem rejeitada pela vision: {image_path}", file=sys.stderr)
+        return veredito
 
     except Exception as e:
         # Detecta sobrecarga temporária do Gemini (503/UNAVAILABLE) com checagem
@@ -136,10 +138,10 @@ def _validate_image(image_path: str, titulo: str) -> bool:
             or "503 UNAVAILABLE" in err_str
         )
         if is_server_overload:
-            print(f"[image_generate] Vision API indisponível (503), aceitando candidato sem validar.", file=sys.stderr)
-            return True
+            print(f"[image_generate] Vision API indisponível (503), candidato vira sugestão não-validada.", file=sys.stderr)
+            return "unavailable"
         print(f"[image_generate] Aviso: validação vision falhou ({e}), rejeitando candidato.", file=sys.stderr)
-        return False
+        return "no"
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -201,7 +203,8 @@ def _try_unsplash(query: str, slug: str, output_dir: str, titulo: str = "") -> d
 
             raw_path = _save_raw(img_resp.content, slug, output_dir)
 
-            if titulo and not _validate_image(raw_path, titulo):
+            veredito = _validate_image(raw_path, titulo) if titulo else "yes"
+            if veredito == "no":
                 print(f"Unsplash: candidato {idx+1}/5 rejeitado, tentando próximo.", file=sys.stderr)
                 continue
 
@@ -220,6 +223,7 @@ def _try_unsplash(query: str, slug: str, output_dir: str, titulo: str = "") -> d
                 "path": cover_path,
                 "source": "unsplash",
                 "credit": f"Foto: {photographer} via Unsplash",
+                "validated": veredito == "yes",
             }
 
         print(f"Unsplash: nenhum dos {len(results)} candidatos passou na validação.", file=sys.stderr)
@@ -270,7 +274,8 @@ def _try_pexels(query: str, slug: str, output_dir: str, titulo: str = "") -> dic
 
             raw_path = _save_raw(img_resp.content, slug, output_dir)
 
-            if titulo and not _validate_image(raw_path, titulo):
+            veredito = _validate_image(raw_path, titulo) if titulo else "yes"
+            if veredito == "no":
                 print(f"Pexels: candidato {idx+1}/5 rejeitado, tentando próximo.", file=sys.stderr)
                 continue
 
@@ -281,6 +286,7 @@ def _try_pexels(query: str, slug: str, output_dir: str, titulo: str = "") -> dic
                 "path": cover_path,
                 "source": "pexels",
                 "credit": f"Foto: {photographer} via Pexels" if photographer else "",
+                "validated": veredito == "yes",
             }
 
         print(f"Pexels: nenhum dos {len(photos)} candidatos passou na validação.", file=sys.stderr)
@@ -343,6 +349,7 @@ def _try_gemini(query: str, slug: str, output_dir: str) -> dict | None:
             "path": cover_path,
             "source": "gemini",
             "credit": "",
+            "validated": True,
         }
 
     except Exception as e:
@@ -394,6 +401,7 @@ def _try_openai(query: str, slug: str, output_dir: str) -> dict | None:
             "path": cover_path,
             "source": "openai",
             "credit": "",
+            "validated": True,
         }
 
     except Exception as e:
@@ -403,25 +411,13 @@ def _try_openai(query: str, slug: str, output_dir: str) -> dict | None:
 
 # ─── Orquestrador ─────────────────────────────────────────────────────────────
 
-def _try_pil_placeholder(slug: str, output_dir: str) -> dict | None:
-    """Último recurso: gera imagem placeholder sólida via PIL (sem API). Sempre funciona."""
-    try:
-        from PIL import Image as PILImage
-        out_dir = Path(output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        img = PILImage.new("RGB", (1920, 1080), color=(45, 55, 72))
-        raw_path = str(out_dir / f"{slug}_raw.jpg")
-        img.save(raw_path, format="JPEG", quality=85)
-        cover_path = _process_to_cover(raw_path, slug, output_dir)
-        print(f"Placeholder PIL gerado como fallback final.", file=sys.stderr)
-        return {"path": cover_path, "source": "placeholder", "credit": ""}
-    except Exception as e:
-        print(f"Placeholder PIL falhou: {e}", file=sys.stderr)
-        return None
-
-
 def generate_image(query: str, slug: str, output_dir: str = ".tmp", titulo: str = "") -> dict:
-    """Tenta Unsplash → Pexels → Gemini → OpenAI → placeholder PIL. Retorna resultado da primeira que funcionar."""
+    """Tenta Unsplash → Pexels → Gemini → OpenAI. Retorna resultado da primeira que funcionar.
+
+    Nunca gera placeholder e nunca chama sys.exit(1): se nenhuma fonte retornar um
+    candidato, retorna um resultado vazio (path="", source="none", validated=False)
+    para o chamador decidir o que fazer (ex.: publicar sem capa).
+    """
     for attempt in [
         lambda q, s, o: _try_unsplash(q, s, o, titulo),
         lambda q, s, o: _try_pexels(q, s, o, titulo),
@@ -432,13 +428,8 @@ def generate_image(query: str, slug: str, output_dir: str = ".tmp", titulo: str 
         if result:
             return result
 
-    print("Aviso: todas as fontes de imagem falharam. Usando placeholder PIL.", file=sys.stderr)
-    result = _try_pil_placeholder(slug, output_dir)
-    if result:
-        return result
-
-    print("Erro crítico: nem o placeholder PIL funcionou.", file=sys.stderr)
-    sys.exit(1)
+    print("Aviso: nenhuma fonte de imagem retornou candidato.", file=sys.stderr)
+    return {"path": "", "source": "none", "credit": "", "validated": False}
 
 
 def main() -> None:
