@@ -3,6 +3,38 @@
 ## Objetivo
 Transformar um release de assessoria de imprensa em post publicável no +blog,
 mantendo 100% dos dados originais, no tom do portal e no formato HTML correto.
+Pipeline implementado em `execution/run_releases.py` + `execution/editorial.py`.
+
+---
+
+## Roteamento de modelos (DeepSeek mecânico × modelo criativo)
+
+O pipeline usa dois modelos diferentes, cada um para o que faz melhor:
+
+- **`EDITORIAL_MODEL`** (`execution/editorial.py`, padrão `deepseek/deepseek-chat`,
+  configurável por env var) — usado para as tarefas **mecânicas/analíticas**:
+  `extrair_fatos`, `avaliar_relevancia`, `extract_editorial_hierarchy`,
+  `validar_fatos`, `resumo_telegram`. Tarefas onde precisão e aderência a
+  formato importam mais que criatividade.
+- **`CREATIVE_MODEL`** (`execution/llm_call.py::creative_model()`, padrão
+  `google/gemini-2.5-flash`, configurável por env var) — usado para as tarefas
+  **de escrita/voz editorial**: `gerar_conteudo` (título, HTML, texto_arte),
+  `gerar_legenda` (Instagram) e a curadoria de pautas semanais.
+
+Essa separação existe porque o modelo mecânico é mais barato e mais confiável
+para extração/classificação estruturada, enquanto o modelo criativo escreve
+com mais naturalidade e evita clichês de assessoria de imprensa.
+
+---
+
+## Deduplicação (sem Google Sheets)
+
+Antes de criar o rascunho, o pipeline consulta
+`wp_publish.py find --slug <slug>`: se um post com o mesmo slug já existir no
+WordPress, o release é pulado (já foi processado). Não existe mais dedup via
+planilha — o próprio WordPress é a fonte de verdade sobre o que já foi
+publicado. IDs de emails processados continuam registrados localmente em
+`.tmp/processed_emails.json` como camada adicional de controle.
 
 ---
 
@@ -183,7 +215,9 @@ Se `relevante` for `false`, preencha `motivo_descarte` e retorne os demais campo
 
 ## Notas operacionais (aprendizados do sistema)
 
-- **Deduplicação:** IDs de emails processados ficam em `.tmp/processed_emails.json` (máx 500). Emails já processados são ignorados automaticamente em runs subsequentes.
+- **Deduplicação:** por slug via `wp_publish.py find --slug` (ver seção acima), mais o registro local de emails processados em `.tmp/processed_emails.json` (máx 500). Emails já processados são ignorados automaticamente em runs subsequentes.
 - **Categoria inválida:** Se o LLM retornar um `wp_category_id` fora da lista acima, o sistema faz fallback automático para Eventos (12).
 - **Tags:** O pipeline cria tags no WordPress automaticamente se não existirem.
 - **Imagem IG:** Após o card de aprovação, a arte do Instagram é enviada como segunda foto no Telegram para visualização.
+- **Fallback visível no card:** quando `gerar_conteudo`, `gerar_arte_com_validacao` ou `gerar_legenda` não conseguem produzir um resultado válido do LLM (erro de API, JSON malformado, validação crítica falhando mesmo após retry), o sistema aplica um fallback determinístico e **marca isso no card do Telegram** com uma linha `⚠️ Revisar: <motivo>` — nunca publica um fallback silenciosamente como se fosse conteúdo normal. O editor humano decide se aprova, edita ou descarta.
+- **Sem imagem adequada:** se nenhuma imagem (anexo, Unsplash, Pexels, geração) for aprovada, o rascunho não fica travado nem usa placeholder — vai um card `⚠️ Sem imagem adequada` ao Telegram com botões `[Usar sugestão]` / `[Vou enviar foto]` (ver `directives/image-select-resize.md`).

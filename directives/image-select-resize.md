@@ -2,7 +2,9 @@
 
 ## Objetivo
 Garantir que todo post publicado tenha uma imagem de capa 1920x1080px, WebP, <1MB,
-com qualidade editorial adequada.
+com qualidade editorial adequada — e que, quando isso não for possível
+automaticamente, **nunca se publique com placeholder ou foto não verificada em
+silêncio**: o operador humano decide via Telegram.
 
 ---
 
@@ -11,16 +13,26 @@ com qualidade editorial adequada.
 ```
 Email tem anexos de imagem?
   SIM → Rodar image_select.py
-          score >= 4 + vision OK → Rodar image_process.py → .tmp/{slug}_cover.webp  ✓
-          score < 4 ou vision rejeita → Descartar anexos → ir para "Sem imagem adequada"
-  NÃO → ir para "Sem imagem adequada"
+          score >= 4 + vision = "yes"          → image_process.py → .tmp/{slug}_cover.webp  ✓ (capa automática)
+          score >= 4 + vision = "unavailable"  → vira SUGESTÃO (não aprova sozinha), tenta próximo candidato
+          score < 4 ou vision = "no"           → descarta este anexo, tenta próximo
+  NÃO → segue para banco de imagens
 
-Sem imagem adequada → LLM gera query focada na atividade/pessoas → Rodar image_generate.py
+Nenhum anexo aprovado automaticamente → LLM gera query focada na atividade/pessoas → image_generate.py
   Tentativa 1: Unsplash (grátis)
   Tentativa 2: Pexels (grátis)
   Tentativa 3: Gemini image generation (~$0.039)
   Tentativa 4: GPT Image 1 medium (~$0.04)
-  → Resultado sempre passa por image_process.py → .tmp/{slug}_cover.webp  ✓
+  → Candidato validado ("yes")   → image_process.py → .tmp/{slug}_cover.webp  ✓ (capa automática)
+  → Candidato "unavailable"      → vira SUGESTÃO (se ainda não há uma melhor)
+
+Se, ao final de tudo, não há capa automática (só sugestão ou nada):
+  → run_releases.py NÃO publica sem imagem nem usa a sugestão sozinho
+  → Telegram recebe card `⚠️ Sem imagem adequada` (send-image-pending) com:
+      [✔️ Usar sugestão]  (só aparece se houver suggestion_path)
+      [📷 Vou enviar foto]
+  → "Usar sugestão": completa o rascunho com a imagem não validada, sob decisão humana
+  → "Vou enviar foto": bot aguarda a próxima foto enviada no chat e a usa como capa
 ```
 
 ---
@@ -88,14 +100,31 @@ O campo `credito_imagem` no JSON de saída do Claude deve ser preenchido somente
 
 ---
 
-## Verificação de relevância via Gemini Vision
+## Verificação de relevância via Gemini Vision — tri-state `yes`/`no`/`unavailable`
 
-Aplicada em **duas etapas**:
+Tanto `_imagem_relevante` (`run_releases.py`, para anexos de email) quanto
+`_validate_image` (`image_generate.py`, para stock/geração) retornam um de
+três veredictos, nunca um booleano simples:
+
+- **`"yes"`** — vision rodou e aprovou: imagem real, relevante ao título, sem
+  texto proeminente. Vira capa automática.
+- **`"no"`** — vision rodou e rejeitou (não é fotografia real, texto/marca
+  d'água proeminente, ou tema incompatível). Candidato descartado, tenta o
+  próximo.
+- **`"unavailable"`** — a vision **não conseguiu rodar** (sem
+  `GEMINI_API_KEY`, ou a API respondeu **503/UNAVAILABLE**, indicando
+  sobrecarga temporária do Gemini). **`"unavailable"` nunca é tratado como
+  aprovação automática** — em ambos os fluxos (anexo de email e stock), um
+  candidato "unavailable" vira no máximo uma **sugestão não validada**
+  (`suggestion_path`), nunca a capa final do post. Essa é a mudança central:
+  antes um 503 podia acabar aprovando a imagem por omissão; hoje ele é tratado
+  como "não sei", e a decisão final fica para o operador humano no card
+  `⚠️ Sem imagem adequada`.
 
 ### 1. Anexos de email (`run_releases.py` → `_imagem_relevante`)
 Após `image_select.py` aprovar o score técnico, antes de `image_process.py`.
-Verifica: foto real + relevante ao título.
-Em caso de falha da vision API, a imagem é **rejeitada** (vai para Unsplash/Gemini) — mais seguro que aceitar.
+Verifica: foto real + relevante ao título. `"yes"` vira capa; `"no"` descarta
+o anexo; `"unavailable"` vira sugestão (primeira encontrada é mantida).
 
 ### 2. Imagens de stock (`image_generate.py` → `_validate_image`)
 Aplicada a **cada candidato** do Unsplash/Pexels antes de aceitar.
@@ -104,9 +133,33 @@ Verifica **três condições obrigatórias**:
 2. A fotografia é **visualmente relacionada** ao título do post
 3. A imagem **não tem texto proeminente** (cartazes, banners, legendas sobrepostas)
 
-O Unsplash/Pexels tentam até 5 candidatos em ordem. O primeiro que passar nas 3 condições é usado.
-Se todos falharem, o pipeline avança para Gemini/OpenAI.
-Em caso de falha da vision API durante validação de stock, a imagem é **aceita** (já é fallback — mais tolerante).
+O Unsplash/Pexels tentam até 5 candidatos em ordem. O primeiro `"yes"` é usado
+como capa automática. Se todos falharem (`"no"`) ou só renderem
+`"unavailable"`, o pipeline avança para Gemini/OpenAI image generation; se
+mesmo assim não houver `"yes"`, o melhor candidato `"unavailable"` (se houver)
+vira sugestão para o card de pendência.
+
+---
+
+## Sem placeholder, sem fallback silencioso — card `send-image-pending`
+
+Quando o pipeline termina sem uma capa aprovada automaticamente
+(`cover_path` vazio), `run_releases.py` **não** cria o rascunho com imagem
+genérica nem publica sem foto. Ele chama
+`telegram_notify.py send-image-pending` com o `suggestion_path` (se houver) e
+o Telegram mostra:
+
+- `⚠️ Sem imagem adequada` — texto do card.
+- Botão `[✔️ Usar sugestão]` — só aparece se existir uma sugestão não
+  validada; aciona o callback `usethis:<post_id>`, que completa o rascunho
+  com essa imagem sob decisão explícita do operador.
+- Botão `[📷 Vou enviar foto]` — aciona `sendphoto:<post_id>`; o bot
+  (`telegram_bot.py`) entra em modo de espera e a **próxima foto enviada no
+  chat** é baixada e usada como capa, resolvendo a pendência.
+
+Isso substitui qualquer comportamento anterior de fallback silencioso (ex.:
+publicar sem imagem destacada) — a pendência fica visível e a decisão é
+sempre humana.
 
 ---
 
@@ -117,4 +170,6 @@ Em caso de falha da vision API durante validação de stock, a imagem é **aceit
 | Anexo é logo ou artefato gráfico (< 100KB) | Score automático 0 — implementado em `image_select.py` |
 | Imagem tem marca d'água visível | Score automático 0 — descartar |
 | Unsplash retorna 0 resultados para a query | Tentar query mais genérica (só cidade + tema) antes de ir para Gemini |
-| Todas as tentativas de geração falham | Registrar erro no log, criar rascunho WP sem imagem destacada |
+| Vision retorna 503 (sobrecarga) | Veredito `"unavailable"` — candidato vira sugestão, nunca aprovação automática |
+| Sem `GEMINI_API_KEY` configurada | Veredito `"unavailable"` em toda chamada de vision — mesmo tratamento acima |
+| Todas as tentativas de geração falham | Card `⚠️ Sem imagem adequada` ao Telegram com `[Usar sugestão]`/`[Vou enviar foto]` — nunca publica sem decisão humana |

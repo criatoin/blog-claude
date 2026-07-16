@@ -37,7 +37,6 @@ if _now.weekday() >= 5 or not (8 <= _now.hour < 18):
 
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
-IG_MODEL = str(PROJECT_DIR / "assets" / "instagram" / "6.jpg")
 OUTPUT_DIR = str(PROJECT_DIR / ".tmp")
 PROCESSED_FILE = PROJECT_DIR / ".tmp" / "processed_emails.json"
 VALID_CATEGORY_IDS = {10, 11, 12, 13, 19, 22, 23, 384, 533, 540, 561}
