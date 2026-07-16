@@ -437,7 +437,7 @@ Release original:
 {release_text[:6000]}"""
 
     try:
-        result = _llm.llm_call_json(system=system, user=user, model=_llm.creative_model())
+        result = _llm.llm_call_json(system=system, user=user, model=_llm.creative_model(), max_tokens=8192)
         if isinstance(result, dict) and result.get("titulo_site"):
             if "creditos_wordpress" in result:
                 result["creditos_wordpress"]["usar_apenas_no_html_wordpress"] = True

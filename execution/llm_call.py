@@ -134,7 +134,12 @@ def llm_call(
     raise RuntimeError(f"llm_call falhou após {MAX_RETRIES} tentativas: {last_error}")
 
 
-def llm_call_json(system: str, user: str, model: str | None = None) -> dict | list:
+def llm_call_json(
+    system: str,
+    user: str,
+    model: str | None = None,
+    max_tokens: int = 4096,
+) -> dict | list:
     """
     Variante que extrai e parseia JSON da resposta do modelo.
     Remove blocos ```json ... ``` se presentes.
@@ -145,7 +150,7 @@ def llm_call_json(system: str, user: str, model: str | None = None) -> dict | li
     Raises:
         RuntimeError: Se não conseguir parsear JSON
     """
-    raw = llm_call(system=system, user=user, model=model, json_mode=True)
+    raw = llm_call(system=system, user=user, model=model, max_tokens=max_tokens, json_mode=True)
     text = raw.strip()
 
     def _extract_json_block(s: str) -> str:

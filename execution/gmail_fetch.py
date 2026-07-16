@@ -201,7 +201,8 @@ def fetch_emails(max_results: int, output_dir: Path) -> list[dict]:
 
     # Busca emails das últimas 3h (SINCE) — captura tanto UNSEEN quanto SEEN
     # necessário porque clientes de email (Outlook, celular) podem marcar como lido
-    # antes do pipeline processar. O dedup do Sheets evita reprocessamento.
+    # antes do pipeline processar. O dedup via slug no WordPress (wp_publish.py find --slug)
+    # + .tmp/processed_emails.json evita reprocessamento.
     from datetime import datetime, timedelta, timezone as _tz
     cutoff = (datetime.now(_tz.utc) - timedelta(hours=3)).strftime("%d-%b-%Y")
     status, data = conn.search(None, f'SINCE "{cutoff}"')
@@ -252,7 +253,7 @@ def fetch_emails(max_results: int, output_dir: Path) -> list[dict]:
                 "attachments": attachments,
             })
 
-            # NÃO marca como lido — dedup via Sheets evita reprocessamento
+            # NÃO marca como lido — dedup via slug no WordPress + .tmp/processed_emails.json evita reprocessamento
             # (marcar \Seen causava perda de emails quando o pipeline crashava)
 
         except Exception as e:

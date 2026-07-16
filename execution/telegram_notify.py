@@ -317,7 +317,7 @@ def cmd_send_image_pending(data: dict) -> dict:
         f"📰 {_escape(titulo)}\n\n"
         f"O rascunho foi criado sem imagem destacada\\. "
         f"Escolha uma opção abaixo ou edite direto no WP\\.\n\n"
-        f"[Editar rascunho]({edit_url})"
+        f"[Editar rascunho]({_escape(edit_url)})"
     )
 
     row = []

@@ -362,7 +362,6 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     )
     legenda_curta = legendas.get("legenda_curta", "")
     legenda_longa = legendas.get("legenda_contexto", "")
-    hashtags = legendas.get("hashtags", [])
 
     # Valida saída de arte e legenda contra a hierarquia editorial
     erros_hierarquia = validate_instagram_output_against_hierarchy(
