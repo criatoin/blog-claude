@@ -23,7 +23,7 @@ def test_gerar_legenda_usa_modelo_criativo(monkeypatch):
     monkeypatch.delenv("CREATIVE_MODEL", raising=False)
 
     result = editorial.gerar_legenda({"gratuito": True}, "resumo")
-    assert captured["model"] == "google/gemini-2.5-flash"
+    assert captured["model"] == "deepseek/deepseek-v4-pro"
     assert "_fallback" not in result
 
 

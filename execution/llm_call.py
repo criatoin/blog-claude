@@ -28,8 +28,8 @@ load_dotenv()
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "deepseek/deepseek-chat"
-DEFAULT_CREATIVE_MODEL = "google/gemini-2.5-flash"
-TIMEOUT_SECS = 60
+DEFAULT_CREATIVE_MODEL = "deepseek/deepseek-v4-pro"
+TIMEOUT_SECS = 120  # V4 pro varia de 15s a 95s em textos longos
 MAX_RETRIES = 3
 
 
@@ -83,6 +83,10 @@ def llm_call(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+
+    if model_id.startswith("deepseek/deepseek-v4"):
+        # Escrita editorial não precisa de raciocínio: metade do custo e do tempo
+        payload["reasoning"] = {"enabled": False}
 
     if json_mode:
         # Força a API a devolver JSON válido (structured output do OpenRouter)
