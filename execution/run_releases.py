@@ -246,7 +246,7 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         extrair_fatos, avaliar_relevancia, extract_editorial_hierarchy,
         gerar_arte_com_validacao, gerar_legenda,
         validate_instagram_output_against_hierarchy,
-        validar_fatos, resumo_telegram,
+        checar_e_corrigir, resumo_telegram,
     )
 
     email_id = email.get("id", "?")
@@ -370,17 +370,17 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     if erros_hierarquia:
         print(f"[run_releases]   Aviso hierarquia: {erros_hierarquia}", file=sys.stderr)
 
-    # 6. Validação factual
-    print(f"[run_releases]   6/7 Validando fatos...", file=sys.stderr)
-    post_para_validar = {**post, "legenda_curta": legenda_curta}
-    validacao = validar_fatos(body_text, fatos, post_para_validar)
-    risco = validacao.get("risco_alucinacao", "baixo")
-    if risco != "baixo":
-        print(f"[run_releases]   Risco de alucinacao: {risco}", file=sys.stderr)
+    # 6. Checagem factual (código + Jev) com até 2 correções automáticas
+    print(f"[run_releases]   6/7 Checando fatos (código + Jev)...", file=sys.stderr)
+    post, checagem = checar_e_corrigir(body_text, post, legenda_curta)
+    titulo = post.get("titulo_site") or titulo
+    html = post.get("html", "")
+    print(f"[run_releases]   Checagem: {checagem['status']} · {checagem['frases_checadas']} frases · "
+          f"US$ {checagem['custo_usd']}", file=sys.stderr)
 
     # 7. Resumo para Telegram
     print(f"[run_releases]   7/7 Montando resumo Telegram...", file=sys.stderr)
-    card_meta = resumo_telegram(post, validacao, avaliacao)
+    card_meta = resumo_telegram(post, checagem, avaliacao)
 
     # 9. HTML com bloco de créditos ao final (exclusivo WordPress)
     sender_clean = sender.split("<")[0].strip() or sender.split("@")[0]
@@ -456,7 +456,7 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         "relevante": True,
         "titulo": titulo,
         "post_id": post_id,
-        "risco_alucinacao": risco,
+        "checagem": checagem["status"],
     }
 
 

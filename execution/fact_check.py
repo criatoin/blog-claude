@@ -45,7 +45,7 @@ RISCO_ALERTA = 0.3       # soma que só gera alerta no card
 CAMPOS_CORRIGIVEIS = ("titulo_site", "subtitulo", "resumo_telegram", "html")
 
 
-# ─── Texto ────────────────────────────────────────────────────────────────────────────────
+# ─── Texto ──────────
 
 def texto_limpo(texto: str) -> str:
     """Remove tags HTML e entidades, colapsa espaços."""
@@ -79,7 +79,7 @@ def dividir_frases(texto: str) -> list[str]:
     return frases
 
 
-# ─── Camada 1: entidades por código ───────────────────────────────────────────────────
+# ─── Camada 1: entidades por código ──────────
 
 _MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
           "agosto", "setembro", "outubro", "novembro", "dezembro"]
@@ -215,7 +215,7 @@ def checar_entidades(release: str, campos: dict[str, str]) -> list[dict]:
     return problemas
 
 
-# ─── Camada 2: Jev frase a frase ────────────────────────────────────────────────────────
+# ─── Camada 2: Jev frase a frase ──────────
 
 _PERGUNTA_JEV = {
     "verdict": {
