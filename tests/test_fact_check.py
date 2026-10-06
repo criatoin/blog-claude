@@ -25,7 +25,7 @@ def _codigo(texto_materia: str, release: str = RELEASE_MAC) -> list[dict]:
     return fc.checar_entidades(fc.texto_limpo(release), {"html": texto_materia})
 
 
-# ─── Camada 1: entidades ────────────────────────────────────────────────────────────────────────
+# ─── Camada 1: entidades ──────────
 
 def test_dados_iguais_ao_release_passam():
     materia = ("Na segunda-feira (4 de maio), às 19h30, o MAC exibe o filme na Avenida Brasil, nº 1.293. "
@@ -87,7 +87,7 @@ def test_medida_com_h_nao_vira_horario():
     assert fc.extrair_entidades("área de 10 hectares")["horarios"] == set()
 
 
-# ─── Divisão de texto ─────────────────────────────────────────────────────────────────
+# ─── Divisão de texto ──────────
 
 def test_dividir_frases_respeita_abreviacoes():
     frases = fc.dividir_frases("O MAC fica na Av. Brasil, 1.293. A entrada é gratuita.")
@@ -107,7 +107,7 @@ def test_frases_para_checar_separa_blocos_e_ignora_dado_ausente():
     assert "MAC exibe clássico coreano" in frases
 
 
-# ─── Camada 2: Jev (mockado) e status ─────────────────────────────────────────────────────────
+# ─── Camada 2: Jev (mockado) e status ──────────
 
 def _fake_jev(veredito_por_trecho: dict[str, str], default: str = "supported"):
     def fake(release, frase):

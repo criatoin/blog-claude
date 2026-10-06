@@ -14,16 +14,50 @@ O pipeline usa dois modelos diferentes, cada um para o que faz melhor:
 - **`EDITORIAL_MODEL`** (`execution/editorial.py`, padrão `deepseek/deepseek-chat`,
   configurável por env var) — usado para as tarefas **mecânicas/analíticas**:
   `extrair_fatos`, `avaliar_relevancia`, `extract_editorial_hierarchy`,
-  `validar_fatos`, `resumo_telegram`. Tarefas onde precisão e aderência a
+  (`resumo_telegram` agora vive em `editorial_checagem.py`, sem LLM). Tarefas onde precisão e aderência a
   formato importam mais que criatividade.
 - **`CREATIVE_MODEL`** (`execution/llm_call.py::creative_model()`, padrão
-  `google/gemini-2.5-flash`, configurável por env var) — usado para as tarefas
+  `deepseek/deepseek-v4-pro`, raciocínio desligado, configurável por env var) — usado para as tarefas
   **de escrita/voz editorial**: `gerar_conteudo` (título, HTML, texto_arte),
-  `gerar_legenda` (Instagram) e a curadoria de pautas semanais.
+  `gerar_legenda` (Instagram), `editorial_checagem.corrigir_texto` (reescrita após a checagem factual) e a
+  curadoria de pautas semanais (desativada desde 2026-10-06).
 
 Essa separação existe porque o modelo mecânico é mais barato e mais confiável
 para extração/classificação estruturada, enquanto o modelo criativo escreve
 com mais naturalidade e evita clichês de assessoria de imprensa.
+
+---
+
+## Checagem factual (código + Jev)
+
+O LLM só escreve. Quem confere é `execution/fact_check.py`, sem LLM gerador:
+
+1. **Código:** datas, horários, valores (R$), telefones, links, e-mails, @perfis e
+   gratuidade citados na matéria precisam existir no release (formatos diferentes
+   do mesmo dado são normalizados: 19h30 = 19:30, 04/05 = 4 de maio).
+2. **Jev** (TypeSafe, via OpenRouter `/api/alpha/decisions`, mesma `OPENROUTER_API_KEY`):
+   cada frase da matéria, título, subtítulo, resumo, arte e legenda é classificada
+   contra o release — `supported`, `contradicted`, `mixed`, `insufficient_evidence`
+   ou `opinion`. Risco (soma das 3 ruins) ≥ 0,6 bloqueia; 0,3–0,6 vira alerta.
+
+Se houver problema em título/subtítulo/resumo/HTML, `editorial_checagem.checar_e_corrigir`
+manda a lista exata ao `CREATIVE_MODEL` para corrigir só aqueles trechos e checa de
+novo — até 2 vezes. Problemas na arte ou na legenda viram alerta no card.
+
+O card do Telegram mostra uma linha de status:
+- `✅ Checagem: N frases conferidas com o release`
+- `⛔ Checagem: N problema(s) não corrigido(s) — revise antes de publicar`
+- `⚠️ Checagem incompleta: N frase(s) não conferida(s)` — Jev falhou; **nunca** vira aprovado.
+
+Custo medido: ~US$ 0,00004 e ~2 s por frase (6 em paralelo) → ~US$ 0,001 e ~10 s por matéria.
+Env opcionais: `JEV_MODEL` (padrão `~typesafe/jev-latest`), `JEV_WORKERS` (padrão 6).
+Teste manual: `python execution/fact_check.py --release-file R.txt --post-file P.json`.
+
+Aprendizados: o endpoint do Jev é `alpha` (pode mudar). A categoria `opinion` é necessária
+na pergunta — sem ela, opinião editorial e informação inventada caem ambas em
+`insufficient_evidence`. O `deepseek/deepseek-v4-pro` varia de 15 s a 95 s por texto longo:
+por isso `TIMEOUT_SECS=120` e raciocínio desligado (`reasoning.enabled=false`) em
+`llm_call.py` para modelos `deepseek/deepseek-v4*`.
 
 ---
 
@@ -133,7 +167,7 @@ Várias atrações ou eventos num mesmo post (ex: programação semanal).
 
 ## Regras de SEO
 
-- **Título:** máximo 65 caracteres. Deve conter o nome da cidade + tema principal.
+- **Título:** máximo de 65 caracteres. Deve conter o nome da cidade + tema principal.
   Exemplos: `"Festival de Jazz chega a Americana em abril"`,
   `"Prefeitura abre inscrições para curso gratuito de culinária em SBO"`
 - **Slug:** gerado a partir do título em lowercase, hífens, sem acentos, sem stop words.
