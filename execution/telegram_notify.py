@@ -75,7 +75,7 @@ def _api(method: str, poll_timeout: int = 0, **kwargs) -> dict:
     return data
 
 
-# ─── Pending approvals (estado persistido em .tmp/) ──────────────────────────
+# ─── Pending approvals (estado persistido em .tmp/) ──────────
 
 def _load_pending() -> dict:
     if PENDING_FILE.exists():
@@ -88,7 +88,7 @@ def _save_pending(data: dict) -> None:
     PENDING_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# ─── Helper de botões restantes ───────────────────────────────────────────────
+# ─── Helper de botões restantes ──────────
 
 def _build_remaining_buttons(entry: dict) -> list[list[dict]]:
     """
@@ -115,7 +115,7 @@ def _build_remaining_buttons(entry: dict) -> list[list[dict]]:
     return [row] if row else []
 
 
-# ─── Comandos ─────────────────────────────────────────────────────────────────
+# ─── Comandos ──────────
 
 def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
                      cover: str, sheets_row_id: str,
@@ -146,6 +146,7 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
         except (ValueError, TypeError):
             urg_line = ""
         acao_line = f"💡 {_escape(acao)}" if acao else ""
+        checagem_line = _escape(card_meta.get("checagem", ""))
         alerta_line = (
             f"⚠️ Revisar: {_escape('; '.join(str(a) for a in alertas[:2]))}"
             if alertas else ""
@@ -160,6 +161,7 @@ def cmd_send_release(post_id: int, title: str, summary: str, edit_url: str,
             scores,
             urg_line,
             acao_line,
+            checagem_line,
             alerta_line,
             "",
             f"[Editar rascunho]({edit_url})",
@@ -557,7 +559,7 @@ def _execute_action(action: str, post_id: int, sheets_row_id: str, user: str,
     return {"post_id": post_id, "action": action, "status": new_status}
 
 
-# ─── Offset helper (persiste o offset do getUpdates) ─────────────────────────
+# ─── Offset helper (persiste o offset do getUpdates) ──────────
 
 OFFSET_FILE = Path(".tmp/telegram_offset.json")
 
@@ -571,7 +573,7 @@ def _save_offset(offset: int) -> None:
     OFFSET_FILE.write_text(json.dumps({"offset": offset}))
 
 
-# ─── Markdown V2 escape ───────────────────────────────────────────────────────
+# ─── Markdown V2 escape ──────────
 
 def _escape(text: str) -> str:
     """Escapa caracteres especiais do MarkdownV2 do Telegram."""
@@ -579,7 +581,7 @@ def _escape(text: str) -> str:
     return "".join(f"\\{c}" if c in special else c for c in text)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# ─── Main ──────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Notificações Telegram com aprovação inline")
