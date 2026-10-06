@@ -246,8 +246,8 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         extrair_fatos, avaliar_relevancia, extract_editorial_hierarchy,
         gerar_arte_com_validacao, gerar_legenda,
         validate_instagram_output_against_hierarchy,
-        checar_e_corrigir, resumo_telegram,
     )
+    from editorial_checagem import checar_e_corrigir, resumo_telegram
 
     email_id = email.get("id", "?")
     subject = email.get("subject", "")
