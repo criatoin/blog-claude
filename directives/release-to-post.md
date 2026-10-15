@@ -53,6 +53,14 @@ Custo medido: ~US$ 0,00004 e ~2 s por frase (6 em paralelo) → ~US$ 0,001 e ~10
 Env opcionais: `JEV_MODEL` (padrão `~typesafe/jev-latest`), `JEV_WORKERS` (padrão 6).
 Teste manual: `python execution/fact_check.py --release-file R.txt --post-file P.json`.
 
+**Frases de lacuna (2026-10-15):** além do prompt, `execution/text_guard.py` remove em código as frases que
+comentam a ausência de informação ("não foram divulgados", "será divulgado em breve", "não há detalhes"...)
+do HTML, do resumo e da legenda, antes da checagem. O redator também não recebe mais `informacoes_ausentes`
+nem `observacoes` do JSON de fatos (ele acabava escrevendo sobre isso). O mínimo fixo de 400 palavras foi
+trocado por tamanho proporcional ao release: ele forçava enchimento em releases curtos. A checagem por código
+também passou a exigir que o mês citado na matéria apareça no release quando o release traz só o dia
+("domingo (19)").
+
 Aprendizados: o endpoint do Jev é `alpha` (pode mudar). A categoria `opinion` é necessária
 na pergunta — sem ela, opinião editorial e informação inventada caem ambas em
 `insufficient_evidence`. O `deepseek/deepseek-v4-pro` varia de 15 s a 95 s por texto longo:
@@ -83,8 +91,11 @@ Nova Odessa e Sumaré.** O leitor é morador da região, informal, curioso, ocup
 - Sem juridiquês: proibido "no que tange", "haja vista", "consoante", "outrossim".
 - Sem corporativês: proibido "robusto", "sinergia", "ecossistema", "stakeholders".
 - Sem emoji.
-- Nunca inventar dados. Se faltar informação (horário, endereço, valor), sinalize
-  com `[DADO AUSENTE: descrição]` no HTML e registre no log.
+- Nunca inventar dados. Se faltar informação (horário, endereço, valor, atrações), **omita**:
+  o texto não fala do que não se sabe. Proibido "os detalhes não foram divulgados", "ainda não há
+  informações", "será divulgado em breve", "a expectativa é de que...", "espera-se que...".
+  Release curto vira matéria curta (a partir de ~150 palavras); nunca encher de texto genérico
+  (elogios, estrutura do local, o que levar). O leitor quer saber o que vai acontecer, não o que faltou.
 
 ---
 
@@ -167,7 +178,7 @@ Várias atrações ou eventos num mesmo post (ex: programação semanal).
 
 ## Regras de SEO
 
-- **Título:** máximo de 65 caracteres. Deve conter o nome da cidade + tema principal.
+- **Título:** máximo 65 caracteres. Deve conter o nome da cidade + tema principal.
   Exemplos: `"Festival de Jazz chega a Americana em abril"`,
   `"Prefeitura abre inscrições para curso gratuito de culinária em SBO"`
 - **Slug:** gerado a partir do título em lowercase, hífens, sem acentos, sem stop words.
