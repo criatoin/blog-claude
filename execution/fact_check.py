@@ -183,6 +183,9 @@ def checar_entidades(release: str, campos: dict[str, str]) -> list[dict]:
     """
     rel = extrair_entidades(release)
     dias_release = {d for d, _ in rel["datas"]}
+    release_minusculo = release.lower().replace("ç", "c")
+    meses_do_release = {m for _, m in rel["datas"] if m} | {
+        i + 1 for i, nome in enumerate(_MESES) if nome.replace("ç", "c") in release_minusculo}
     problemas: list[dict] = []
 
     def _add(campo: str, trecho: str, motivo: str) -> None:
@@ -193,7 +196,11 @@ def checar_entidades(release: str, campos: dict[str, str]) -> list[dict]:
     for campo, texto in campos.items():
         art = extrair_entidades(texto)
         for dia, mes in sorted(art["datas"], key=lambda x: (x[0], x[1] or 0)):
-            ok = (dia, mes) in rel["datas"] or (dia, None) in rel["datas"] or (mes is None and dia in dias_release)
+            if mes is None:
+                ok = dia in dias_release
+            else:
+                # dia solto no release ("domingo (19)") só vale para um mês que o release também cite
+                ok = (dia, mes) in rel["datas"] or ((dia, None) in rel["datas"] and mes in meses_do_release)
             if not ok:
                 _add(campo, _fmt_data(dia, mes), "data não consta no release")
         for minutos in sorted(art["horarios"] - rel["horarios"]):

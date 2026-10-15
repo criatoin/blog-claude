@@ -248,6 +248,7 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         validate_instagram_output_against_hierarchy,
     )
     from editorial_checagem import checar_e_corrigir, resumo_telegram
+    from text_guard import limpar_texto
 
     email_id = email.get("id", "?")
     subject = email.get("subject", "")
@@ -360,8 +361,8 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
         arte_instagram=post.get("texto_arte"),
         hierarchy=hierarchy,
     )
-    legenda_curta = legendas.get("legenda_curta", "")
-    legenda_longa = legendas.get("legenda_contexto", "")
+    legenda_curta, _ = limpar_texto(legendas.get("legenda_curta", ""))
+    legenda_longa, _ = limpar_texto(legendas.get("legenda_contexto", ""))
 
     # Valida saída de arte e legenda contra a hierarquia editorial
     erros_hierarquia = validate_instagram_output_against_hierarchy(
