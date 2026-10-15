@@ -46,3 +46,19 @@ Os tokens do GitHub (URL do remote e memória) estavam inválidos (401), então 
 - Dedup por slug no WordPress é fraco com o V4 (slugs variam); a proteção real é o `processed_emails.json`, agora persistente.
 - O endpoint do Jev é `alpha` e pode mudar. Se mudar, a checagem cai em `incompleto` (⚠️ no card), nunca em aprovado.
 - `checar_e_corrigir` leva cerca de 90 s por matéria.
+
+## Atualização 2026-10-15 — textos sem frases sobre o que não se sabe
+
+**Problema relatado:** matérias com frases como "Embora os detalhes específicos das atrações não tenham sido divulgados, a expectativa é de que haja opções variadas para entreter os visitantes…". O leitor não quer ler o que faltou no release.
+
+**Causa (três juntas):** o redator recebia `informacoes_ausentes` no JSON de fatos e escrevia sobre isso; nenhuma regra proibia especular ("a expectativa é de que…"); e o prompt exigia "mínimo: 400 palavras", o que forçava enchimento em releases curtos. A frase de lacuna ainda derrubava a matéria para ⛔, porque é afirmação sem base no release.
+
+**Correções**
+- Prompt (`editorial.py`): regra "NUNCA escreva sobre o que não se sabe" e proibição de especular; `_fatos_para_redacao` esconde `informacoes_ausentes` e `observacoes` do redator; tamanho proporcional ao release no lugar do mínimo de 400 palavras.
+- `execution/text_guard.py` (novo): remove em código as frases que comentam a ausência de informação ("não foram divulgados", "será divulgado em breve", "não há detalhes"…) do HTML, resumo, subtítulo e legendas, antes da checagem e depois de cada correção. Frases normais com negação ("não terá custo") ficam.
+- `fact_check.py`: mês citado na matéria só passa se o release também citar o mês. O teste real com um release magro expôs o furo: o modelo escreveu "19 de janeiro" e o release só dizia "domingo (19)".
+- Diretiva atualizada: a regra antiga mandava sinalizar `[DADO AUSENTE]` no HTML, o contrário do desejado.
+
+**Resultado:** release magro de 3 frases virou matéria de 114 palavras, sem enchimento e sem lacunas. 72 testes passando. Deploy em 2026-10-15, 12:39 BRT (commit `6598e210`), sem perda de estado graças ao volume `/app/.tmp`.
+
+**Git:** `git fetch` funciona (repositório público), mas `git push` segue sem credencial válida; os arquivos subiram pelo conector do GitHub, conferidos byte a byte por hash, e o git local foi alinhado com `git reset --hard origin/main`.
