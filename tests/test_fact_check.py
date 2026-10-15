@@ -207,3 +207,21 @@ def test_linha_card():
     assert fc.linha_card({"status": "bloqueado", "bloqueantes": [{}, {}]}).startswith("⛔ Checagem: 2 problema(s)")
     assert fc.linha_card({"status": "incompleto", "nao_checadas": 3}).startswith("⚠️ Checagem incompleta: 3")
     assert fc.linha_card({}) == "⚠️ Checagem não rodou"
+
+
+def test_mes_inventado_quando_release_so_tem_o_dia_bloqueia():
+    release = "A Festa da Família será neste domingo (19), das 9h às 17h, no Parque Ecológico."
+    problemas = _codigo("A festa é no domingo, 19 de janeiro.", release=release)
+    assert [p["trecho"] for p in problemas] == ["19/01"]
+    assert problemas[0]["motivo"] == "data não consta no release"
+
+
+def test_mes_citado_em_outro_ponto_do_release_passa():
+    release = "A feira acontece no dia 19. O calendário de outubro traz outras atrações."
+    assert _codigo("A feira é no dia 19 de outubro.", release=release) == []
+
+
+def test_mes_em_data_numerica_do_release_passa():
+    release = "Sessão neste domingo (19), às 9h.\n\n19/10/2026"
+    assert _codigo("Sessão no domingo, 19 de outubro.", release=release) == []
+    assert [p["trecho"] for p in _codigo("Sessão no domingo, 19 de maio.", release=release)] == ["19/05"]
