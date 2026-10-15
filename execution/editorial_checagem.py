@@ -12,6 +12,7 @@ import sys
 import editorial as _ed
 import fact_check as _fc
 import llm_call as _llm
+import text_guard as _tg
 
 MAX_CORRECOES = 2
 
@@ -58,6 +59,17 @@ Matéria atual:
     return {k: str(result[k]) if k in result else atual[k] for k in _fc.CAMPOS_CORRIGIVEIS}
 
 
+def _sem_lacunas(post: dict) -> dict:
+    """Tira da matéria as frases sobre o que não se sabe (ver text_guard). Devolve uma cópia."""
+    novo = dict(post)
+    novo["html"], r_html = _tg.limpar_html(post.get("html", ""))
+    novo["resumo_telegram"], r_res = _tg.limpar_texto(post.get("resumo_telegram", ""))
+    novo["subtitulo"], r_sub = _tg.limpar_texto(post.get("subtitulo", ""))
+    for frase in r_html + r_res + r_sub:
+        print(f"[editorial] Frase de lacuna removida: {frase[:90]}", file=sys.stderr)
+    return novo
+
+
 def checar_e_corrigir(release_text: str, post: dict, legenda: str = "") -> tuple[dict, dict]:
     """
     Checa a matéria (fact_check: código + Jev). Se houver problema em campo
@@ -65,6 +77,7 @@ def checar_e_corrigir(release_text: str, post: dict, legenda: str = "") -> tuple
     Problemas na arte ou na legenda não são reescritos: vão como alerta no card.
     Retorna (post_final, checagem_final).
     """
+    post = _sem_lacunas(post)
     checagem = _fc.verificar_post(release_text, post, legenda)
     for tentativa in range(1, MAX_CORRECOES + 1):
         problemas = [b for b in checagem["bloqueantes"] if b["campo"] in _fc.CAMPOS_CORRIGIVEIS]
@@ -75,7 +88,7 @@ def checar_e_corrigir(release_text: str, post: dict, legenda: str = "") -> tuple
         corrigido = corrigir_texto(release_text, post, problemas)
         if not corrigido:
             break
-        post = {**post, **corrigido}
+        post = _sem_lacunas({**post, **corrigido})
         checagem = _fc.verificar_post(release_text, post, legenda)
     return post, checagem
 
