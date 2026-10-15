@@ -37,7 +37,19 @@ quando / onde / para quem, gancho humano ou cultural, título com curiosidade ou
 REGRA FACTUAL OBRIGATÓRIA: afirme apenas informações presentes no release original ou no
 JSON de fatos. Nunca invente datas, horários, locais, atrações, preços, cidades, links ou
 formas de inscrição.
+
+NUNCA escreva sobre o que não se sabe. O leitor quer saber o que vai acontecer, não o que
+faltou no release. Se uma informação não está no release, simplesmente não fale dela — escreva
+um texto mais curto, sem lacunas. Proibido: "os detalhes não foram divulgados", "ainda não há
+informações", "será divulgado em breve", "a confirmar", "embora ... não tenha sido informado".
+Proibido também especular: "a expectativa é de que haja...", "espera-se que...", "deve haver...",
+"provavelmente...", "possivelmente...". Escreva só o que o release afirma.
 """.strip()
+
+
+def _fatos_para_redacao(fatos: dict) -> dict:
+    """Fatos mostrados ao redator: sem a lista do que falta no release (ele acabaria escrevendo sobre isso)."""
+    return {k: v for k, v in fatos.items() if k not in ("informacoes_ausentes", "observacoes")}
 
 
 def extrair_fatos(release_text: str) -> dict:
@@ -322,9 +334,9 @@ def gerar_conteudo(
         nao_usar_str = "\n".join(f"  - {t}" for t in hierarchy.get("nao_usar_como_foco", []))
         passadas_str = "\n".join(f"  - {t}" for t in hierarchy.get("atividades_passadas", []))
         hierarchy_instrucao = f"""
-════════════════════════════════
+══════════
 HIERARQUIA EDITORIAL (OBRIGATÓRIO)
-════════════════════════════════
+══════════
 FOCO PRINCIPAL: {hierarchy.get("foco_principal", "")}
 ÂNGULO PARA ARTE: {hierarchy.get("angulo_arte_recomendado", "")}
 ÂNGULO PARA INSTAGRAM: {hierarchy.get("angulo_instagram_recomendado", "")}
@@ -341,23 +353,25 @@ A arte e a legenda NÃO PODEM usar qualquer item da lista "NÃO USAR COMO FOCO".
 
     system = f"""{angulo_instrucao}{hierarchy_instrucao}{_VOZ_EDITORIAL}
 
-════════════════════════════════
+══════════
 HTML PURO — PROIBIDO USAR MARKDOWN
-════════════════════════════════
+══════════
 O campo "html" deve conter APENAS tags HTML válidas. Nunca use Markdown.
 Use: <p>, <h2>, <strong>, <em>, <ul>, <li>
-Mínimo: 400 palavras de conteúdo rico.
+Tamanho proporcional ao que o release realmente diz: release curto = matéria curta (a partir de
+150 palavras), release rico = matéria mais longa. NUNCA encha de texto genérico, elogios ou
+descrições que não estão no release (estrutura do local, como chegar, o que levar, clima).
 
-════════════════════════════════
+══════════
 ESTRUTURA DO POST
-════════════════════════════════
+══════════
 - Abra com gancho forte (1 frase que prende)
 - Desenvolva com contexto, detalhes e citações do release
 - Feche com bloco Serviço (<h2>Serviço</h2> + <ul>) para eventos
 
-════════════════════════════════
+══════════
 CATEGORIAS WORDPRESS
-════════════════════════════════
+══════════
 Música: 23 | Arte: 22 | Audiovisual: 533 | Literatura: 540
 Educação: 384 | Diversão: 11 | Cultura: 13 | Rolês: 19
 Comida: 10 | Eventos: 12
@@ -387,9 +401,9 @@ Retorne APENAS um objeto JSON válido (sem markdown):
   }}
 }}
 
-════════════════════════════════
+══════════
 REGRAS PARA texto_arte
-════════════════════════════════
+══════════
 - A arte deve refletir o FOCO PRINCIPAL definido na hierarquia editorial acima.
 - Não use atividades passadas como título da arte.
 - Não use contexto secundário como chamada principal.
@@ -408,9 +422,9 @@ REGRAS PARA texto_arte
     ERRADO (comprido demais, +70 chars): "Espetáculo gratuito de palhaços acontece hoje na praça central da cidade"
     ERRADO (estilo release): "Projeto leva magia da leitura para crianças"
 
-════════════════════════════════
+══════════
 REGRAS DE CRÉDITO (campo creditos_wordpress)
-════════════════════════════════
+══════════
 - texto: se o release tiver autor/assessoria/MTb → "[nome], com informações de [fonte], reescrito pela equipe do +blog"
   Se não houver → "reescrito pela equipe do +blog"
 - fotos: crédito de fotos do release ou "Divulgação"
@@ -429,7 +443,7 @@ REGRAS DE CRÉDITO (campo creditos_wordpress)
         "_fallback": "conteúdo gerado por fallback — revisar manualmente",
     }
 
-    fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
+    fatos_str = json.dumps(_fatos_para_redacao(fatos), ensure_ascii=False, indent=2)
     user = f"""Fatos extraídos:
 {fatos_str}
 
@@ -493,7 +507,7 @@ def gerar_legenda(
             f"linha_apoio: {arte.get('linha_apoio', '')}"
         )
 
-    fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
+    fatos_str = json.dumps(_fatos_para_redacao(fatos), ensure_ascii=False, indent=2)
 
     # Bloco de hierarquia editorial para o prompt
     hierarchy_str = ""
@@ -785,7 +799,7 @@ def query_from_fatos(fatos: dict, titulo: str) -> str:
     return " ".join(partes) or titulo[:60]
 
 
-# ─── Validação de texto da arte ──────────────────────────────────────────────
+# ─── Validação de texto da arte ──────────
 
 _PALAVRAS_PROIBIDAS_ARTE = [
     "imperdível", "confira", "não perca", "vem aí",
