@@ -115,3 +115,23 @@ def test_card_do_telegram_mostra_linha_de_checagem(monkeypatch):
     tn.cmd_send_release(1, "Título", "resumo", "https://x/edit", "nao-existe.jpg", "0",
                         card_meta={"checagem": "✅ Checagem: 12 frases conferidas com o release"})
     assert "✅ Checagem: 12 frases conferidas com o release" in captured["text"]
+
+
+def test_checar_e_corrigir_remove_frases_de_lacuna_antes_de_checar(monkeypatch):
+    import editorial_checagem as editorial
+    import fact_check as fc
+
+    vistos = []
+
+    def fake_verificar(release, post, legenda=""):
+        vistos.append(post["html"])
+        return APROVADO
+
+    monkeypatch.setattr(fc, "verificar_post", fake_verificar)
+    post = {**POST, "html": "<p>Feira no sábado. Os detalhes ainda não foram divulgados.</p>",
+            "resumo_telegram": "Feira no sábado. Mais informações serão divulgadas em breve."}
+    final, checagem = editorial.checar_e_corrigir("release", post)
+    assert final["html"] == "<p>Feira no sábado.</p>"
+    assert final["resumo_telegram"] == "Feira no sábado."
+    assert vistos == ["<p>Feira no sábado.</p>"]  # o Jev nunca vê a frase de lacuna
+    assert checagem["status"] == "aprovado"

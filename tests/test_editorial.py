@@ -76,3 +76,50 @@ def test_validar_arte_titulo_curto_permanece():
             "badge": "CULTURA"}
     corrigida, alertas = editorial.validar_arte(arte, {"gratuito": True})
     assert corrigida["titulo_principal"] == "Sarau Ameriafro"
+
+
+def _captura_prompts(monkeypatch):
+    import llm_call as lc
+
+    captured = {}
+
+    def fake(system, user, model=None, max_tokens=None):
+        captured["system"], captured["user"] = system, user
+        return {"titulo_site": "T", "html": "<p>x</p>", "legenda_curta": "a", "legenda_contexto": "b"}
+
+    monkeypatch.setattr(lc, "llm_call_json", fake)
+    return captured
+
+
+FATOS_COM_LACUNA = {"cidade": "Americana", "informacoes_ausentes": ["programação das atrações"],
+                    "observacoes": ["faltam detalhes das atrações"]}
+
+
+def test_gerar_conteudo_nao_mostra_o_que_falta_ao_redator(monkeypatch):
+    import editorial
+
+    captured = _captura_prompts(monkeypatch)
+    editorial.gerar_conteudo("release", FATOS_COM_LACUNA, {})
+    assert "informacoes_ausentes" not in captured["user"]
+    assert "faltam detalhes" not in captured["user"]
+    assert "Americana" in captured["user"]  # os fatos úteis continuam
+    assert "NUNCA escreva sobre o que não se sabe" in captured["system"]
+
+
+def test_gerar_legenda_nao_mostra_o_que_falta_ao_redator(monkeypatch):
+    import editorial
+
+    captured = _captura_prompts(monkeypatch)
+    editorial.gerar_legenda(FATOS_COM_LACUNA, "resumo")
+    assert "informacoes_ausentes" not in captured["user"]
+    assert "NUNCA escreva sobre o que não se sabe" in captured["system"]
+
+
+def test_gerar_conteudo_nao_exige_tamanho_minimo_fixo(monkeypatch):
+    import editorial
+
+    captured = _captura_prompts(monkeypatch)
+    editorial.gerar_conteudo("release", {"cidade": "Americana"}, {})
+    system = captured["system"]
+    assert "Mínimo: 400 palavras" not in system  # forçava enchimento em releases curtos
+    assert "release curto = matéria curta" in system
