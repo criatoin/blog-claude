@@ -227,6 +227,34 @@ def set_featured(post_id: int, image_path: str) -> dict:
     return {"post_id": post_id, "media_id": up["media_id"], "url": up.get("url", "")}
 
 
+def set_seo(post_id: int, title: str, description: str, keyphrase: str = "") -> dict:
+    """
+    Preenche os campos de SEO do All in One SEO (título, meta description, palavra-chave de foco,
+    Open Graph/Twitter) e o resumo (excerpt) do WordPress. Confere o resultado relendo o post.
+    Rota nativa do AIOSEO: POST /wp-json/aioseo/v1/post (testada em rascunho com Application Password).
+    """
+    wp_url, auth = get_config()
+    payload: dict = {
+        "id": post_id,
+        "title": title,
+        "description": description,
+        "og_title": title,
+        "og_description": description,
+        "twitter_use_og": True,
+    }
+    if keyphrase:
+        payload["keyphrases"] = {"focus": {"keyphrase": keyphrase}}
+    _check_response(requests.post(f"{wp_url}/wp-json/aioseo/v1/post", json=payload, auth=auth))
+    _check_response(requests.post(f"{wp_url}/wp-json/wp/v2/posts/{post_id}", json={"excerpt": description}, auth=auth))
+
+    lido = _check_response(requests.get(
+        f"{wp_url}/wp-json/wp/v2/posts/{post_id}",
+        params={"context": "edit", "_fields": "aioseo_meta_data"}, auth=auth,
+    )).get("aioseo_meta_data") or {}
+    ok = lido.get("title") == title and lido.get("description") == description
+    return {"post_id": post_id, "seo_gravado": ok, "title": title, "description": description, "keyphrase": keyphrase}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Gerencia posts no WordPress via REST API")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -262,9 +290,18 @@ def main() -> None:
     p_sf.add_argument("--post-id", type=int, required=True)
     p_sf.add_argument("--image-path", required=True)
 
+    # set-seo
+    p_seo = subparsers.add_parser("set-seo", help="Preenche os campos de SEO (AIOSEO) de um post")
+    p_seo.add_argument("--post-id", type=int, required=True)
+    p_seo.add_argument("--title", required=True)
+    p_seo.add_argument("--description", required=True)
+    p_seo.add_argument("--keyphrase", default="")
+
     args = parser.parse_args()
 
-    if args.command == "create":
+    if args.command == "set-seo":
+        result = set_seo(args.post_id, args.title, args.description, args.keyphrase)
+    elif args.command == "create":
         tag_names = [t.strip() for t in args.tags.split(",") if t.strip()] if args.tags else []
         result = create_post(args.title, args.html, args.image_path, args.category_id, tag_names)
     elif args.command == "publish":

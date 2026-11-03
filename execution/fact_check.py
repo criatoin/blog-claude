@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 JEV_URL = "https://openrouter.ai/api/alpha/decisions"
-LIMITE_RELEASE = 12000   # caracteres do release enviados ao Jev
+LIMITE_RELEASE = 20000   # caracteres do release enviados ao Jev
 LIMITE_FRASES = 80       # teto de frases por checagem (latência)
 RISCO_BLOQUEIO = 0.6     # soma das probabilidades ruins que bloqueia
 RISCO_ALERTA = 0.3       # soma que só gera alerta no card
@@ -222,6 +222,45 @@ def checar_entidades(release: str, campos: dict[str, str]) -> list[dict]:
     return problemas
 
 
+def checar_cobertura(release: str, texto_materia: str) -> list[dict]:
+    """
+    Checagem INVERSA: dados verificáveis que estão no release e NÃO aparecem na matéria
+    (horário, valor, telefone, link, e-mail, data com mês). Omitir é permitido quando o release
+    não traz o dado, mas perder dado que o release traz é falha — vira alerta no card
+    (um por tipo de dado). `texto_materia` é o texto limpo do HTML.
+    """
+    rel = extrair_entidades(release)
+    art = extrair_entidades(texto_materia)
+    faltas: list[tuple[str, list[str]]] = []
+
+    datas = sorted(((d, m) for d, m in rel["datas"] if m and (d, m) not in art["datas"]), key=lambda x: (x[1], x[0]))
+    if datas:
+        faltas.append(("datas", [_fmt_data(d, m) for d, m in datas]))
+    horas = sorted(rel["horarios"] - art["horarios"])
+    if horas:
+        faltas.append(("horários", [f"{m // 60:02d}h{m % 60:02d}" for m in horas]))
+    valores = sorted(rel["valores"] - art["valores"])
+    if valores:
+        faltas.append(("valores", [f"R$ {c / 100:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+                                   for c in valores]))
+    tels = sorted(rel["telefones"] - art["telefones"])
+    if tels:
+        faltas.append(("telefones", tels))
+    links = sorted(l for l in rel["links"] if not any(a.startswith(l) or l.startswith(a) for a in art["links"]))
+    if links:
+        faltas.append(("links", links))
+    emails = sorted(rel["emails"] - art["emails"])
+    if emails:
+        faltas.append(("e-mails", emails))
+
+    alertas = []
+    for tipo, itens in faltas:
+        mostra = ", ".join(itens[:8]) + (f" e mais {len(itens) - 8}" if len(itens) > 8 else "")
+        alertas.append({"campo": "html", "trecho": "", "origem": "codigo",
+                        "motivo": f"o release traz {len(itens)} {tipo} que não aparecem na matéria: {mostra}"})
+    return alertas
+
+
 # ─── Camada 2: Jev frase a frase ──────────
 
 _PERGUNTA_JEV = {
@@ -339,6 +378,8 @@ def verificar_post(release: str, post: dict, legenda: str = "") -> dict:
     campos = campos_do_post(post, legenda)
     bloqueantes = checar_entidades(release_limpo, campos)
     alertas: list[dict] = []
+    if campos["html"]:
+        alertas += checar_cobertura(release_limpo, campos["html"])
     if len(release_limpo) > LIMITE_RELEASE:
         alertas.append({"campo": "release", "trecho": "",
                         "motivo": f"release longo: Jev leu só os primeiros {LIMITE_RELEASE} caracteres",

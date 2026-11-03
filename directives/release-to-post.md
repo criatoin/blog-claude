@@ -61,11 +61,60 @@ trocado por tamanho proporcional ao release: ele forçava enchimento em releases
 também passou a exigir que o mês citado na matéria apareça no release quando o release traz só o dia
 ("domingo (19)").
 
+**Cobertura inversa (2026-11-03):** o Jev e a checagem por código só viam o que foi *escrito*. Agora
+`fact_check.checar_cobertura` também confere o contrário: datas (com mês), horários, valores, telefones, links
+e e-mails que estão no release e **sumiram** da matéria viram alerta no card ("o release traz N horários que
+não aparecem na matéria: ..."). É alerta (não bloqueia) porque omitir pode ser legítimo.
+
 Aprendizados: o endpoint do Jev é `alpha` (pode mudar). A categoria `opinion` é necessária
 na pergunta — sem ela, opinião editorial e informação inventada caem ambas em
 `insufficient_evidence`. O `deepseek/deepseek-v4-pro` varia de 15 s a 95 s por texto longo:
 por isso `TIMEOUT_SECS=120` e raciocínio desligado (`reasoning.enabled=false`) em
 `llm_call.py` para modelos `deepseek/deepseek-v4*`.
+
+---
+
+## Agenda: publicada na íntegra, sem reescrita por IA (2026-11-03)
+
+**Por quê:** release de agenda (programação do mês/fim de semana) já vem estruturado. A reescrita por IA
+perdia itens (o release de novembro tinha 10.747 caracteres, o modelo lia só 6.000 e a matéria saiu sem metade
+da programação) e deixava eventos sem data. Reescrever não agregava; só trazia risco.
+
+**Como:** `execution/agenda_release.py` detecta o release de agenda (≥ 5 cabeçalhos de data: `04/11 (quarta-feira)`,
+`07 e 08/11`, `De 10 a 13/11`, `Todas as terças-feiras...`) e monta o post **por código, sem LLM**:
+- introdução do release (parágrafos copiados) + `<h2>Programação completa</h2>` + um `<h3>` por data com o texto
+  do release como veio (só reflow das quebras de linha do e-mail; sites e e-mails viram link);
+- cabeçalhos ficam **exatamente** como no release (não se infere mês: testado, gerava data que o release não tem);
+- título, slug, tags, categoria (Rolês, 19) e resumo saem de regra: `Agenda cultural de <mês> em <cidade>`;
+- rodapé: *"Informações enviadas por <instituição> e publicadas na íntegra pelo +blog."* + autoria do release
+  (`Texto: ...`). Sem instituição identificada: *"Informações recebidas por release e publicadas na íntegra pelo +blog."*
+- A IA continua só na legenda do Instagram e na arte. Nesse modo **não há laço de correção** (corrigir = reescrever);
+  a checagem do Jev cobre só a legenda.
+
+Release com poucos blocos de data, evento único, notícia e retrospectiva seguem o fluxo de reescrita.
+Se o release não traz a data de um item (ex.: "Juca Jazz Festival" no release de novembro), a matéria não a tem
+e **não se inventa**.
+
+**Limite de leitura:** o modelo agora lê até `editorial.LIMITE_RELEASE` = 20.000 caracteres do release (antes
+3.000–6.000 e cortava releases longos). Jev: `fact_check.LIMITE_RELEASE` = 20.000.
+
+---
+
+## SEO (All in One SEO) — preenchido automaticamente (2026-11-03)
+
+Depois de criar o rascunho, `run_releases.py` chama `wp_publish.py set-seo` e preenche, por regra (sem LLM,
+em `execution/seo_fields.py`, a partir do que a matéria já diz):
+- **Título SEO:** título da matéria + ` • +blog` (sem o sufixo se passar de 60 caracteres);
+- **Meta description:** primeiras frases da abertura que cabem em 155 caracteres; se a primeira já passa, corta
+  na última palavra inteira com `…` (nunca no meio de palavra). Agenda usa texto fixo
+  ("Veja a agenda cultural de <mês> em <cidade>, com datas, horários, locais e ingressos de cada evento.");
+- **Palavra-chave de foco:** `agenda cultural <cidade>` ou 3 palavras relevantes do título + cidade;
+- **Open Graph/Twitter:** mesmo título e descrição; **resumo (excerpt)** do WordPress = descrição.
+
+Rota usada: `POST /wp-json/aioseo/v1/post` (nativa do AIOSEO, funciona com Application Password e em rascunho).
+O endpoint `toin-seo/v1/pages/{id}/meta` responde "sucesso" mas **não altera** o SEO de rascunho de post e não
+aceita palavra-chave: não usar para posts. O `set-seo` relê o post e confere; se não gravou, o card do Telegram
+ganha o alerta "SEO não foi gravado no WordPress".
 
 ---
 

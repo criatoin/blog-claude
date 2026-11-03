@@ -41,7 +41,7 @@ Retorne APENAS um objeto JSON com as chaves:
 {lista}
 
 Release original:
-{release_text[:6000]}
+{release_text[:_ed.LIMITE_RELEASE]}
 
 Matéria atual:
 {json.dumps(atual, ensure_ascii=False)}"""

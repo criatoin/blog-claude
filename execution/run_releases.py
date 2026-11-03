@@ -249,6 +249,9 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     )
     from editorial_checagem import checar_e_corrigir, resumo_telegram
     from text_guard import limpar_texto
+    from agenda_release import eh_agenda, montar_post_agenda
+    from seo_fields import montar_seo
+    import fact_check as _fc
 
     email_id = email.get("id", "?")
     subject = email.get("subject", "")
@@ -286,10 +289,18 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
 
     # 4. Gera conteúdo editorial com validação e retentativa automática
     print(f"[run_releases]   4/7 Gerando conteúdo...", file=sys.stderr)
-    post = gerar_arte_com_validacao(
-        body_text, fatos, avaliacao, sender=sender,
-        release_titulo=subject, hierarchy=hierarchy,
-    )
+    # Release de AGENDA (vários blocos de data) é publicado na íntegra, montado por código:
+    # reescrever com IA perdia itens e trocava dados (ver directives/release-to-post.md).
+    modo_agenda = eh_agenda(body_text)
+    if modo_agenda:
+        post = montar_post_agenda(body_text, fatos, sender=sender)
+        print(f"[run_releases]   Modo agenda: {post['_blocos']} blocos publicados na íntegra (sem reescrita).",
+              file=sys.stderr)
+    else:
+        post = gerar_arte_com_validacao(
+            body_text, fatos, avaliacao, sender=sender,
+            release_titulo=subject, hierarchy=hierarchy,
+        )
 
     titulo = post.get("titulo_site") or subject[:65]
     slug = post.get("slug") or "post-sem-slug"
@@ -373,7 +384,12 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
 
     # 6. Checagem factual (código + Jev) com até 2 correções automáticas
     print(f"[run_releases]   6/7 Checando fatos (código + Jev)...", file=sys.stderr)
-    post, checagem = checar_e_corrigir(body_text, post, legenda_curta)
+    if modo_agenda:
+        # O corpo é cópia do release: nada a conferir nem a "corrigir" (corrigir = reescrever).
+        # Confere só o que a IA escreveu: a legenda do Instagram.
+        checagem = _fc.verificar_post(body_text, {"texto_arte": {}}, legenda_curta)
+    else:
+        post, checagem = checar_e_corrigir(body_text, post, legenda_curta)
     titulo = post.get("titulo_site") or titulo
     html = post.get("html", "")
     print(f"[run_releases]   Checagem: {checagem['status']} · {checagem['frases_checadas']} frases · "
@@ -386,7 +402,10 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     # 9. HTML com bloco de créditos ao final (exclusivo WordPress)
     sender_clean = sender.split("<")[0].strip() or sender.split("@")[0]
     credito_texto = creditos.get("texto", "").strip() or f"reescrito pela equipe do +blog com informações de {sender_clean}"
-    creditos_html = f'<p><em>Texto: {credito_texto}. Fotos: {foto_credit}</em></p>'
+    if modo_agenda:
+        creditos_html = f'<p><em>Fotos: {foto_credit}</em></p>'   # aviso e autoria já estão no corpo
+    else:
+        creditos_html = f'<p><em>Texto: {credito_texto}. Fotos: {foto_credit}</em></p>'
     html_com_creditos = html + "\n" + creditos_html
 
     # 10. Publica rascunho no WordPress
@@ -409,6 +428,21 @@ def processar_email(email: dict, dry_run: bool = False) -> dict:
     _mark_processed(email_id)
     post_id = wp_result.get("post_id")
     edit_url = wp_result.get("edit_url", "")
+
+    # SEO (All in One SEO): título, meta description e palavra-chave, montados por regra a partir da matéria
+    seo = montar_seo(post, fatos, cidade=post.get("_cidade") or avaliacao.get("cidade", ""))
+    seo_res = _run_json([
+        str(SCRIPT_DIR / "wp_publish.py"), "set-seo",
+        "--post-id", str(post_id),
+        "--title", seo["title"],
+        "--description", seo["description"],
+        "--keyphrase", seo["keyphrase"],
+    ])
+    if seo_res and seo_res.get("seo_gravado"):
+        print(f"[run_releases]   SEO gravado: {seo['title']} | {seo['keyphrase']}", file=sys.stderr)
+    else:
+        print(f"[run_releases]   Aviso: SEO não confirmado no WP — preencher manualmente.", file=sys.stderr)
+        card_meta.setdefault("alertas", []).append("SEO não foi gravado no WordPress — preencher no editor")
 
     # 11. Notifica Telegram com card enriquecido
     if cover_path:

@@ -17,6 +17,8 @@ import llm_call as _llm
 import instagram_image as _ig
 
 EDITORIAL_MODEL = os.getenv("EDITORIAL_MODEL", "deepseek/deepseek-chat")
+# Quanto do release o modelo lê. Antes era 3000-6000 e cortava releases longos (agenda de 10 mil caracteres perdia metade).
+LIMITE_RELEASE = 20000
 
 _VOZ_EDITORIAL = """
 Você é o editor assistente do +blog, portal regional de cultura, diversão e vida nas cidades
@@ -94,7 +96,7 @@ Retorne APENAS um objeto JSON com exatamente estes campos:
 }"""
 
     try:
-        result = _llm.llm_call_json(system=system, user=release_text[:6000], model=EDITORIAL_MODEL)
+        result = _llm.llm_call_json(system=system, user=release_text[:LIMITE_RELEASE], model=EDITORIAL_MODEL)
         if isinstance(result, dict):
             return {**_FATOS_VAZIOS, **result}
         return _FATOS_VAZIOS
@@ -155,7 +157,7 @@ Retorne APENAS um objeto JSON:
 {json.dumps(fatos, ensure_ascii=False, indent=2)}
 
 Release original (primeiros 3000 chars):
-{release_text[:3000]}"""
+{release_text[:LIMITE_RELEASE]}"""
 
     try:
         result = _llm.llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
@@ -249,7 +251,7 @@ Responda apenas em JSON válido:
 }"""
 
     fatos_str = json.dumps(fatos, ensure_ascii=False, indent=2)
-    user = f"Fatos extraídos:\n{fatos_str}\n\nRelease:\n{release_text[:5000]}"
+    user = f"Fatos extraídos:\n{fatos_str}\n\nRelease:\n{release_text[:LIMITE_RELEASE]}"
 
     try:
         result = _llm.llm_call_json(system=system, user=user, model=EDITORIAL_MODEL)
@@ -448,7 +450,7 @@ REGRAS DE CRÉDITO (campo creditos_wordpress)
 {fatos_str}
 
 Release original:
-{release_text[:6000]}"""
+{release_text[:LIMITE_RELEASE]}"""
 
     try:
         result = _llm.llm_call_json(system=system, user=user, model=_llm.creative_model(), max_tokens=8192)
@@ -736,7 +738,7 @@ Se não houver problemas, retorne aprovado=true, risco=baixo, problemas=[]."""
 
     html_sem_tags = post.get("html", "")[:2000]
     user = f"""Release original (fonte da verdade):
-{release_text[:3000]}
+{release_text[:LIMITE_RELEASE]}
 
 Fatos extraídos:
 {json.dumps(fatos, ensure_ascii=False)}
@@ -1022,7 +1024,7 @@ Retorne APENAS o objeto texto_arte corrigido em JSON:
 }}"""
 
         try:
-            arte_retry = _llm.llm_call_json(system=system_retry, user=f"Release:\n{release_text[:3000]}", model=_llm.creative_model())
+            arte_retry = _llm.llm_call_json(system=system_retry, user=f"Release:\n{release_text[:LIMITE_RELEASE]}", model=_llm.creative_model())
             if isinstance(arte_retry, dict) and arte_retry.get("titulo_principal"):
                 erros2 = _erros_criticos_arte(arte_retry, fatos, release_titulo)
                 if not erros2:
