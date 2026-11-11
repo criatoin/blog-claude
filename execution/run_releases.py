@@ -6,7 +6,7 @@ Fluxo:
   2. Para cada email: llm_call() avalia relevância → não relevante: pula
   3. llm_call() reescreve post → JSON {titulo, slug, html, wp_category_id, credito_imagem}
   4. Dedup por slug: wp_publish.py find --slug <slug> (já existe no WP? pula)
-  5. Pipeline imagem: image_select.py (anexos) → image_process.py ou image_generate.py
+  5. Pipeline imagem: image_select.py (anexos do email) → image_process.py (sempre foto do email)
   6. instagram_image.py + legenda via llm_call()
   7. wp_publish.py create --category-id <id>
   8. telegram_notify.py send-release (SEM --listen — bot daemon cuida dos callbacks)
@@ -87,157 +87,40 @@ def _run_json(args: list[str]) -> dict | list | None:
         return None
 
 
-def _imagem_adequada_para_arte(image_path: str) -> bool:
-    """Verifica resolução mínima sem LLM. Rejeita imagens pequenas demais."""
-    try:
-        from PIL import Image as _PILImage
-        with _PILImage.open(image_path) as img:
-            w, h = img.size
-            return w >= 800 and h >= 600
-    except Exception:
-        return False
-
-
-def _imagem_relevante(image_path: str, titulo: str) -> str:
-    """
-    Usa Gemini Vision para verificar se a imagem é relevante ao título do post.
-    Retorna "yes" (relevante), "no" (não relevante → cai para Unsplash/Gemini) ou
-    "unavailable" (vision não pôde rodar — sem GEMINI_API_KEY ou 503). "unavailable"
-    NUNCA deve ser tratado como aprovação automática pelo chamador.
-    """
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return "unavailable"  # sem chave, não dá para verificar
-
-    try:
-        from google import genai
-        from google.genai import types
-        from PIL import Image as PILImage
-
-        client = genai.Client(api_key=api_key)
-        img = PILImage.open(image_path).convert("RGB")
-
-        import io
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        img_bytes = buf.getvalue()
-
-        prompt = (
-            f"This image came attached to a press release from a Brazilian cultural event. "
-            f"Answer ONLY 'yes' (accept) or 'no' (reject).\n\n"
-            f"ACCEPT the image if ANY of these are true:\n"
-            f"- It contains real people (even if standing in front of a banner, sign, or poster)\n"
-            f"- It shows a real place or venue relevant to the event\n"
-            f"- It is a real photograph, even if it has text overlays, logos, or event banners in the background\n\n"
-            f"REJECT the image ONLY if ALL of these are true:\n"
-            f"- There are NO real people visible in the photo\n"
-            f"- The image is purely a graphic: flyer, poster, digital art, logo, or infographic with no photographic content\n\n"
-            f"Post title for context: '{titulo}'\n\n"
-            f"IMPORTANT: A photo of people standing in front of an event banner is a REAL PHOTO — accept it. "
-            f"Only reject pure graphic design with zero photographic content."
-        )
-
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[
-                prompt,
-                types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes)),
-            ],
-        )
-        # Extrai a última palavra "yes" ou "no" da resposta — Gemini às vezes
-        # formata os steps por extenso antes de dar a resposta final.
-        import re as _re
-        words = _re.findall(r"\b(yes|no)\b", response.text.strip().lower())
-        veredito = words[-1] if words else "no"
-        if veredito == "no":
-            print(f"[run_releases] Imagem rejeitada (logo/não-foto/irrelevante) para '{titulo[:50]}' — usando Unsplash/Gemini.", file=sys.stderr)
-        else:
-            print(f"[run_releases] Imagem aprovada pela vision para '{titulo[:50]}'.", file=sys.stderr)
-        return veredito
-
-    except Exception as e:
-        err_str = str(e)
-        is_server_overload = (
-            "'code': 503" in err_str
-            or '"code": 503' in err_str
-            or "503 UNAVAILABLE" in err_str
-        )
-        if is_server_overload:
-            print(f"[run_releases] Vision API indisponível (503), foto do email vira sugestão não-validada.", file=sys.stderr)
-            return "unavailable"
-        print(f"[run_releases] Aviso: verificação de relevância falhou ({e}), rejeitando imagem por precaução.", file=sys.stderr)
-        return "no"
-
-
 def _pipeline_imagem(email: dict, slug: str, titulo: str = "", fatos: dict | None = None) -> dict:
     """
-    Seleciona imagem de capa. Prioridade: fotos do email > banco de imagens.
+    Seleciona a imagem de capa. Regra editorial (2026-11-11): SEMPRE as fotos do email.
+    Sem banco de imagens (Unsplash/Pexels), sem IA e sem validação por visão — a foto
+    de melhor pontuação (image_select) vira a capa. Logos/ícones já são descartados pelo
+    image_select (arquivo < 20KB). Sem anexo aproveitável → cover_path vazio e o chamador
+    gera o card de pendência (humano envia a foto).
     Retorna dict:
-      cover_path        — capa aprovada ("" se nenhuma)
-      credit            — crédito da capa
-      suggestion_path   — melhor candidata NÃO validada (para o card de pendência)
-      suggestion_credit — crédito da sugestão
+      cover_path        — capa ("" se o email não trouxe foto aproveitável)
+      credit            — crédito da capa (sempre "" — foto de divulgação)
+      suggestion_path / suggestion_credit — mantidos por compatibilidade, sempre vazios
     """
-    if fatos is None:
-        fatos = {}
     vazio = {"cover_path": "", "credit": "", "suggestion_path": "", "suggestion_credit": ""}
     attachments = email.get("attachments", [])
-    sugestao_path, sugestao_credit = "", ""
 
-    if attachments:
-        scored = []
-        for att in attachments:
-            r = _run_json([str(SCRIPT_DIR / "image_select.py"), "--images", att])
-            if r and r.get("score", -1) >= 0:
-                scored.append(r)
-        scored.sort(key=lambda x: x.get("score", 0), reverse=True)
-        print(f"[run_releases] {len(scored)} foto(s) do email para avaliar.", file=sys.stderr)
+    scored = []
+    for att in attachments:
+        r = _run_json([str(SCRIPT_DIR / "image_select.py"), "--images", att])
+        if r and r.get("path") and r.get("score", -1) >= 0:
+            scored.append(r)
+    scored.sort(key=lambda x: x.get("score", 0), reverse=True)
+    print(f"[run_releases] {len(scored)} foto(s) do email para avaliar.", file=sys.stderr)
 
-        for candidate in scored:
-            cpath = candidate.get("path")
-            if not cpath or not _imagem_adequada_para_arte(cpath):
-                continue
-            veredito = _imagem_relevante(cpath, titulo) if titulo else "yes"
-            if veredito == "no":
-                print(f"[run_releases] Foto rejeitada (vision): {Path(cpath).name}", file=sys.stderr)
-                continue
-            proc_result = _run_json([
-                str(SCRIPT_DIR / "image_process.py"),
-                "--input", cpath, "--slug", slug, "--output-dir", OUTPUT_DIR,
-            ])
-            if not proc_result or not proc_result.get("path"):
-                continue
-            if veredito == "unavailable":
-                # Vision fora do ar: foto do email vira sugestão, não capa automática
-                if not sugestao_path:
-                    sugestao_path, sugestao_credit = proc_result["path"], ""
-                    print(f"[run_releases] Vision indisponível — foto vira sugestão.", file=sys.stderr)
-                continue
-            print(f"[run_releases] Usando foto do email: {Path(cpath).name}", file=sys.stderr)
+    for candidate in scored:
+        proc_result = _run_json([
+            str(SCRIPT_DIR / "image_process.py"),
+            "--input", candidate["path"], "--slug", slug, "--output-dir", OUTPUT_DIR,
+        ])
+        if proc_result and proc_result.get("path"):
+            print(f"[run_releases] Usando foto do email: {Path(candidate['path']).name}", file=sys.stderr)
             return {**vazio, "cover_path": proc_result["path"]}
 
-        print(f"[run_releases] Nenhuma foto do email aprovada.", file=sys.stderr)
-
-    # Banco de imagens (Unsplash/Pexels/IA)
-    from editorial import query_from_fatos
-    img_query = query_from_fatos(fatos, titulo)
-    print(f"[run_releases] Buscando em bancos | query='{img_query}'...", file=sys.stderr)
-    gen_result = _run_json([
-        str(SCRIPT_DIR / "image_generate.py"),
-        "--query", img_query, "--slug", slug,
-        "--titulo", titulo, "--output-dir", OUTPUT_DIR,
-    ])
-    if gen_result and gen_result.get("path"):
-        if gen_result.get("validated"):
-            return {**vazio,
-                    "cover_path": gen_result["path"],
-                    "credit": gen_result.get("credit", "")}
-        # Candidato não validado — vira sugestão (se ainda não temos uma do email)
-        if not sugestao_path:
-            sugestao_path = gen_result["path"]
-            sugestao_credit = gen_result.get("credit", "")
-
-    return {**vazio, "suggestion_path": sugestao_path, "suggestion_credit": sugestao_credit}
+    print("[run_releases] Email sem foto aproveitável — card de pendência.", file=sys.stderr)
+    return vazio
 
 
 def processar_email(email: dict, dry_run: bool = False) -> dict:
